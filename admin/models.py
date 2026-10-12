@@ -118,6 +118,8 @@ class ApiKey(Base):
     note = Column(String(255), default="")
     # 绑定的模型分组 id；0 = 未绑定（可用全部启用模型）。分组被删时按 0 处理（自动降级）
     group_id = Column(Integer, default=0)
+    # realm 限定：''=不限（存量默认） / 'cn' / 'global'。跨 realm 调用 403
+    realm = Column(String(8), nullable=False, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -174,6 +174,9 @@ def init_db() -> bool:
         # 迁移：api_keys 加 group_id 列（绑定模型分组；0=不限制）
         _ensure_column("api_keys", "group_id", "INT", "DEFAULT 0")
 
+        # 迁移：api_keys 加 realm 列（Phase 1 密钥版本隔离：''=不限 / cn / global）
+        _ensure_column("api_keys", "realm", "VARCHAR(8)", "DEFAULT ''")
+
         # 迁移：使用记录/日志的查询索引。
         #
         # 为什么必须在迁移里建而不是只靠 create_all：老库的表已经存在，

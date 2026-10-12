@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from admin import backend, pool, model_limits
 from admin import client_profile as cprofile
+from admin import realm as realm_mod
 from admin.config import settings
 from admin.db import SessionLocal, get_db
 from admin.models import Account, AccountModelCooldown, ApiKey, ModelConfig, UsageLog
@@ -75,6 +76,139 @@ def _stream_timeout() -> httpx.Timeout:
     )
 
 _logger = logging.getLogger("proxy")
+
+
+class _ChatStreamCM:
+    """流式 chat POST 的 async context manager：按账号 realm 打开流（Go ChatStream 语义）。
+
+    CN 单候选 `/v2/chat/completions`（零回归）；
+    Global 先 `/console/chat/completions`，404/405 时换 `/v2/chat/completions` 重开。
+    `__aenter__` 只做「打开到拿到响应头」；`__aexit__` 关闭当前流。
+    404/405 路径回落发生在流建立之后（与 Go 一样是真实 POST），
+    不会对上游发两次对话 —— 只是丢弃首个 404/405 响应再开第二个流。
+    """
+
+    def __init__(self, client, body: dict, headers_i: dict, sess_i):
+        self._client = client
+        self._body = body
+        self._headers_i = headers_i
+        self._sess_i = sess_i
+        self._ctx = None
+        self.response = None
+
+    def _urls(self) -> list[str]:
+        acc_realm = getattr(self._sess_i, "realm", None) or "cn"
+        return [realm_mod.chat_base(acc_realm) + p for p in realm_mod.chat_paths(acc_realm)]
+
+    async def __aenter__(self):
+        urls = self._urls()
+        last_exc: Exception | None = None
+        for i, url_i in enumerate(urls):
+            self._ctx = self._client.stream("POST", url_i,
+                                            headers=self._headers_i, json=self._body)
+            try:
+                r = await self._ctx.__aenter__()
+            except Exception as e:  # noqa: BLE001
+                self._ctx = None
+                last_exc = e
+                if i < len(urls) - 1:
+                    continue
+                raise
+            if (i < len(urls) - 1
+                    and realm_mod.chat_fallback_status(r.status_code)):
+                await r.aread()
+                try:
+                    await self._ctx.__aexit__(None, None, None)
+                finally:
+                    self._ctx = None
+                continue
+            self.response = r
+            return r
+        if last_exc is not None:
+            raise last_exc
+        raise httpx.TransportError("chat stream open failed")
+
+    async def __aexit__(self, *exc):
+        if self._ctx is not None:
+            ctx, self._ctx = self._ctx, None
+            try:
+                await ctx.__aexit__(*exc)
+            except Exception:  # noqa: BLE001
+                pass
+        return False
+
+
+async def _post_chat_with_fallback(client, sess_i, body: dict, headers_i: dict):
+    """非流式 chat POST（完整读回响应）：按账号 realm 决定路径候选，404/405 回落。
+
+    Global 首路径 /console 404/405 → /v2；传输层失败同样换路径。异常最终上抛。
+    """
+    acc_realm = getattr(sess_i, "realm", None) or "cn"
+    urls = [realm_mod.chat_base(acc_realm) + p for p in realm_mod.chat_paths(acc_realm)]
+    last_exc: Exception | None = None
+    for i, url_i in enumerate(urls):
+        try:
+            r = await client.post(url_i, headers=headers_i, json=body)
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            if i < len(urls) - 1:
+                continue
+            raise
+        if (i < len(urls) - 1
+                and realm_mod.chat_fallback_status(r.status_code)):
+            continue
+        return r
+    if last_exc is not None:
+        raise last_exc
+    raise httpx.TransportError("chat post failed")
+
+
+def _global_ua_override(sess_i, headers_i: dict) -> dict:
+    """Global 账号出站强制按 realm 切 UA（Go defaultWorkBuddyUAFor）：
+    `WorkBuddy/<ver> WorkBuddy AI/<ver> CLI/<cli>`，防上游 11140 风控误判。
+    CN 保持现状（profile UA）零回归。
+    """
+    if (getattr(sess_i, "realm", None) or "cn") == "global":
+        headers_i["User-Agent"] = realm_mod.chat_ua("global")
+    return headers_i
+
+
+def _filter_rows_by_realm(rows: list, require_realm: str) -> list:
+    """按账号 realm 过滤候选（accounts.realm 列；空值兜底按 domain 现判）。
+
+    供 `_select_account` 与 `/v1/models` 复用，保证「选号」与「列模型」
+    两处的 realm 口径永不漂移。
+    """
+    if not require_realm:
+        return rows
+    out = []
+    for a in rows:
+        ar = (getattr(a, "realm", "") or "").strip()
+        if not ar:
+            try:
+                auth = json.loads(getattr(a, "auth_json", "") or "{}")
+                ar = realm_mod.realm_of(auth)
+            except Exception:  # noqa: BLE001
+                ar = "cn"
+        if ar == require_realm:
+            out.append(a)
+    return out
+
+
+def _realm_shortage_msg(db, require_realm: str) -> str:
+    """realm 限定下选不出号时的**如实**原因：区分「该版本无号」与「有号但不可用」。
+
+    「有号但不可用」时绝不能报「没有该版本账号」——那会把排障引向
+    「去添加账号」，而真实原因只是余额耗尽/冷却/熔断。
+    """
+    if not require_realm:
+        return ""
+    rows = db.query(Account).filter(Account.status == "active").all()
+    has = bool(_filter_rows_by_realm(rows, require_realm))
+    if not has:
+        return f"号池中没有 {require_realm} 版本账号"
+    return f"号池中的 {require_realm} 版本账号当前均不可用（余额或状态不满足）"
+
 
 
 def _exc_text(e: BaseException) -> str:
@@ -850,6 +984,10 @@ def _exhaustion_message(kind: str, last_msg: str, tried_accounts: int,
     base = f"{hint}；{tried}"
     if kind == "waf" and last_msg:
         return f"{base}，已暂停轮转；请稍后重试"
+    if kind == "no_account" and last_msg:
+        # realm 前缀 / 密钥限定导致的「该版本无号」：把原因如实带出，
+        # 否则客户端只看到笼统的「号池没有可用账号」。
+        return f"{base}。原因：{last_msg[:120]}"
     if kind == "transport" and last_msg:
         # 把底层原因带上（如 ReadTimeout / ConnectError），否则用户只看到
         # 「网络连接异常」而无法判断是自己网络、上游抖动还是模型卡住。
@@ -1607,9 +1745,13 @@ def _select_account(db: Session, exclude_ids: set | None = None,
     if not rows:
         return None
 
-    # 真实客户端 IP / realm 维度：本系统只保留 CN 域，require_realm 预留扩展位。
+    # realm 维度：模型前缀（cn:/global:）或密钥限定要求账号属于特定 realm。
+    # 用 accounts.realm 列判定（入库时已按凭证域回填；空则按 domain 现判兜底）。
     if require_realm:
-        rows = [a for a in rows if (a.domain or "").find(require_realm) >= 0] or rows
+        rows = _filter_rows_by_realm(rows, require_realm)
+        if not rows:
+            # 该 realm 无健康账号：返回 None（宁可如实 503 也不跨 realm 串号）
+            return None
 
     # -- 第一层：会话粘性（命中即定，优先于一切均衡策略）------------------
     if sticky_key:
@@ -2076,6 +2218,21 @@ async def chat_completions(
 
     model = payload.get("model", "auto")
 
+    # ---- realm 前缀路由 + 密钥 realm 隔离（Go server/resolve_model.go 语义）----
+    # "cn:model" / "global:model" 前缀剥离后限定该 realm 的账号；
+    # 无前缀按账号自身 realm。密钥 realm（api_keys.realm，''=不限）与之冲突时 403。
+    model_realm, model_bare = realm_mod.resolve_model_prefix(str(model or ""))
+    key_realm = (getattr(key, "realm", "") or "").strip().lower()
+    if model_realm and key_realm and not realm_mod.key_allows_model(key_realm, model_realm):
+        return JSONResponse(
+            status_code=403,
+            content={"error": {
+                "message": f"该 API Key 限定 {key_realm} 版本，不能调用 {model_realm} 版本模型",
+                "type": "realm_forbidden"}})
+    require_realm = model_realm or key_realm  # 选号时的 realm 限定（''=不限）
+    if model_realm:
+        model = model_bare  # 前缀剥离后走白名单/选号；上游只认裸模型名
+
     # 模型白名单检查 + 免费优先选择（绑定了分组的 Key 只在组内选择）
     allowed = _key_group_models(db, key)
     resolved_model = await _blocking_call(_pick_best_model, db, model, allowed)
@@ -2105,7 +2262,8 @@ async def chat_completions(
     opts["include_usage"] = True
     body["stream_options"] = opts
 
-    url = f"{settings.BACKEND}/v2/chat/completions"
+    # chat 出站 URL 由 _ChatStreamCM 按选中账号的 realm 决定（CN=/v2；Global=/console→/v2），
+    # 不再使用全局 settings.BACKEND 常量 —— 否则 Global 账号会被发到 CN 基址。
 
     # 会话粘性键与会话头族在**轮转循环外**算一次，循环内所有尝试复用同一份：
     # 换号重试若换了会话 ID，上游看到的是 N 个并发会话而不是一次对话的一次重试。
@@ -2162,8 +2320,14 @@ async def chat_completions(
                         if not retry_budget.available():
                             break
                         acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
-                                                model=m, sticky_key=sticky_key)
+                                                model=m, sticky_key=sticky_key,
+                                                require_realm=require_realm)
                         if not acc_i:
+                            if require_realm and not tried_ids:
+                                # 首个候选模型就选不出该 realm 的号 → 原因如实带出
+                                # （前缀/密钥要求 realm，但该 realm 无号或号不可用）。
+                                last_err_kind = "no_account"
+                                last_err_msg = _realm_shortage_msg(db2, require_realm)
                             break
                         tried_ids.add(acc_i.id)
                         tried_accounts += 1
@@ -2185,8 +2349,9 @@ async def chat_completions(
                             extra["X-Machine-ID"] = backend.stable_device_id(acc_i.uid, "machine")
                             extra["X-Session-ID"] = backend.stable_device_id(acc_i.uid, "session")
                         headers_i = sess_i.get_headers(extra=extra)
+                        _global_ua_override(sess_i, headers_i)
                         try:
-                            async with client.stream("POST", url, headers=headers_i, json=body) as r:
+                            async with _ChatStreamCM(client, body, headers_i, sess_i) as r:
                                 if r.status_code >= 400:
                                     detail = await r.aread()
                                     text = detail[:65536].decode(errors="ignore") if isinstance(detail, bytes) else str(detail)[:65536]
@@ -2577,6 +2742,23 @@ async def responses_proxy(
     chat_body["stream_options"] = opts
 
     requested = payload.get("model", "auto")
+
+    # ---- realm 前缀路由 + 密钥 realm 隔离（与 /v1/chat/completions 同协议）----
+    model_realm, model_bare = realm_mod.resolve_model_prefix(str(requested or ""))
+    key_realm = (getattr(key, "realm", "") or "").strip().lower()
+    if model_realm and key_realm and not realm_mod.key_allows_model(key_realm, model_realm):
+        return JSONResponse(
+            status_code=403,
+            content={"error": {
+                "message": f"该 API Key 限定 {key_realm} 版本，不能调用 {model_realm} 版本模型",
+                "type": "realm_forbidden"}})
+    require_realm = model_realm or key_realm
+    if model_realm:
+        requested = model_bare
+        # chat_body 里透传的 model 字段也要剥前缀（上游只认裸名）
+        if isinstance(chat_body, dict):
+            chat_body["model"] = model_bare
+
     allowed = _key_group_models(db, key)
     resolved = await _blocking_call(_pick_best_model, db, requested, allowed)
     if resolved is None:
@@ -2592,7 +2774,6 @@ async def responses_proxy(
 
     client_wants_stream = bool(payload.get("stream", True))
     model_name = payload.get("model", "auto")
-    url = f"{settings.BACKEND}/v2/chat/completions"
 
     # 会话粘性键与会话头族：在轮转循环外算一次，循环内所有尝试复用同一份
     # （换号重试若换了会话 ID，上游看到的是 N 个并发会话而非一次对话的一次重试）。
@@ -2622,8 +2803,12 @@ async def responses_proxy(
                     if not retry_budget.available():
                         break
                     acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
-                                            model=m, sticky_key=sticky_key)
+                                            model=m, sticky_key=sticky_key,
+                                            require_realm=require_realm)
                     if not acc_i:
+                        if require_realm and not tried_ids:
+                            last_err_kind = "no_account"
+                            last_err_msg = _realm_shortage_msg(db2, require_realm)
                         break
                     tried_ids.add(acc_i.id)
                     if not POOL.acquire(acc_i.uid or ""):
@@ -2641,9 +2826,10 @@ async def responses_proxy(
                         extra_i["X-Machine-ID"] = backend.stable_device_id(acc_i.uid, "machine")
                         extra_i["X-Session-ID"] = backend.stable_device_id(acc_i.uid, "session")
                     headers_i = sess_i.get_headers(extra=extra_i)
+                    _global_ua_override(sess_i, headers_i)
                     try:
                         async with httpx.AsyncClient(timeout=_stream_timeout(), limits=backend.HTTP_LIMITS) as client:
-                            r = await client.post(url, headers=headers_i, json=body)
+                            r = await _post_chat_with_fallback(client, sess_i, body, headers_i)
                             if r.status_code >= 400:
                                 text = r.text[:65536]
                                 kind = _classify_error(r.status_code, text)
@@ -2775,8 +2961,12 @@ async def responses_proxy(
                         if not retry_budget.available():
                             break
                         acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
-                                                model=m, sticky_key=sticky_key)
+                                                model=m, sticky_key=sticky_key,
+                                                require_realm=require_realm)
                         if not acc_i:
+                            if require_realm and not tried_ids:
+                                last_err_kind = "no_account"
+                                last_err_msg = _realm_shortage_msg(db2, require_realm)
                             break
                         tried_ids.add(acc_i.id)
                         if not POOL.acquire(acc_i.uid or ""):
@@ -2794,12 +2984,13 @@ async def responses_proxy(
                             extra_i["X-Machine-ID"] = backend.stable_device_id(acc_i.uid, "machine")
                             extra_i["X-Session-ID"] = backend.stable_device_id(acc_i.uid, "session")
                         headers_i = sess_i.get_headers(extra=extra_i)
+                        _global_ua_override(sess_i, headers_i)
                         raw_lines.clear()
                         delivered = False
                         pending_events = []
                         converter = ResponsesStreamConverter(model=model_name)
                         try:
-                            async with client.stream("POST", url, headers=headers_i, json=body) as r:
+                            async with _ChatStreamCM(client, body, headers_i, sess_i) as r:
                                 if r.status_code >= 400:
                                     detail = await r.aread()
                                     text = detail[:65536].decode(errors="ignore") if isinstance(detail, bytes) else str(detail)[:65536]
@@ -3025,6 +3216,21 @@ async def anthropic_messages(
             _logger.warning("harness 脱敏失败，按原样发送：%s", e)
 
     requested = _map_anthropic_model(db, payload.get("model", "auto"), key)
+
+    # ---- realm 前缀路由 + 密钥 realm 隔离（与 /v1/chat/completions 同协议）----
+    # Anthropic 客户端也能用 "cn:/global:" 前缀（映射后仍保留前缀的场景）。
+    model_realm, model_bare = realm_mod.resolve_model_prefix(str(requested or ""))
+    key_realm = (getattr(key, "realm", "") or "").strip().lower()
+    if model_realm and key_realm and not realm_mod.key_allows_model(key_realm, model_realm):
+        return JSONResponse(
+            status_code=403,
+            content={"error": {
+                "message": f"该 API Key 限定 {key_realm} 版本，不能调用 {model_realm} 版本模型",
+                "type": "realm_forbidden"}})
+    require_realm = model_realm or key_realm
+    if model_realm:
+        requested = model_bare
+
     allowed = _key_group_models(db, key)
     resolved = await _blocking_call(_pick_best_model, db, requested, allowed)
     if resolved is None:
@@ -3047,7 +3253,6 @@ async def anthropic_messages(
     # Anthropic Messages API 的 stream 默认是 false
     client_wants_stream = bool(payload.get("stream", False))
     model_name = payload.get("model", "auto")
-    url = f"{settings.BACKEND}/v2/chat/completions"
 
     # 会话粘性键与会话头族：轮转循环外算一次，循环内所有尝试复用同一份。
     # 这里用**原始 payload** 而非转换后的 chat_body：Anthropic 协议的
@@ -3078,8 +3283,12 @@ async def anthropic_messages(
                     if not retry_budget.available():
                         break
                     acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
-                                            model=m, sticky_key=sticky_key)
+                                            model=m, sticky_key=sticky_key,
+                                            require_realm=require_realm)
                     if not acc_i:
+                        if require_realm and not tried_ids:
+                            last_err_kind = "no_account"
+                            last_err_msg = _realm_shortage_msg(db2, require_realm)
                         break
                     tried_ids.add(acc_i.id)
                     if not POOL.acquire(acc_i.uid or ""):
@@ -3097,9 +3306,10 @@ async def anthropic_messages(
                         extra_i["X-Machine-ID"] = backend.stable_device_id(acc_i.uid, "machine")
                         extra_i["X-Session-ID"] = backend.stable_device_id(acc_i.uid, "session")
                     headers_i = sess_i.get_headers(extra=extra_i)
+                    _global_ua_override(sess_i, headers_i)
                     try:
                         async with httpx.AsyncClient(timeout=_stream_timeout(), limits=backend.HTTP_LIMITS) as client:
-                            r = await client.post(url, headers=headers_i, json=body)
+                            r = await _post_chat_with_fallback(client, sess_i, body, headers_i)
                             if r.status_code >= 400:
                                 text = r.text[:65536]
                                 kind = _classify_error(r.status_code, text)
@@ -3234,8 +3444,12 @@ async def anthropic_messages(
                         if not retry_budget.available():
                             break
                         acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
-                                                model=m, sticky_key=sticky_key)
+                                                model=m, sticky_key=sticky_key,
+                                                require_realm=require_realm)
                         if not acc_i:
+                            if require_realm and not tried_ids:
+                                last_err_kind = "no_account"
+                                last_err_msg = _realm_shortage_msg(db2, require_realm)
                             break
                         tried_ids.add(acc_i.id)
                         if not POOL.acquire(acc_i.uid or ""):
@@ -3253,12 +3467,13 @@ async def anthropic_messages(
                             extra_i["X-Machine-ID"] = backend.stable_device_id(acc_i.uid, "machine")
                             extra_i["X-Session-ID"] = backend.stable_device_id(acc_i.uid, "session")
                         headers_i = sess_i.get_headers(extra=extra_i)
+                        _global_ua_override(sess_i, headers_i)
                         raw_lines.clear()
                         delivered = False
                         pending_events = []
                         conv = AnthropicStreamConverter(model=model_name)
                         try:
-                            async with client.stream("POST", url, headers=headers_i, json=body) as r:
+                            async with _ChatStreamCM(client, body, headers_i, sess_i) as r:
                                 if r.status_code >= 400:
                                     detail = await r.aread()
                                     text = detail[:65536].decode(errors="ignore") if isinstance(detail, bytes) else str(detail)[:65536]
@@ -3478,12 +3693,41 @@ def models(
     except Exception as e:
         return JSONResponse(status_code=e.status_code, content=e.detail)
 
-    acc = _select_account(db)
-    if not acc:
-        return JSONResponse(status_code=503,
-                            content={"error": {"message": f"无可用账号：{_no_account_reason(db)}",
-                                               "type": "no_account"}})
-    # 绑定了分组的 Key 只应看到组内模型，否则客户端会照着完整列表点模型然后被 403
+    # ---- realm 隔离 + 前缀返回（Go modelList：CN 动态加 cn:，global 加 global:）----
+    key_realm = (getattr(key, "realm", "") or "").strip().lower()
+    # 密钥限定 realm 时只列该 realm 的模型；不限时两个 realm 都列。
+    list_realm = key_realm or ""  # '' = 双域都列
+
+    def _own_models(acc, wanted_realm: str):
+        """从某个账号拉模型目录。返回按该账号 realm 加前缀的条目列表。
+
+        wanted_realm 非空时只处理该 realm 的账号；空时 CN 与 global 各取一次。
+        """
+        with backend.AccountSession(acc.auth_json) as sess:
+            models_raw = sess.fetch_models()
+            acc.auth_json = sess.updated_json()
+        acc_realm = getattr(sess, "realm", "cn")
+        prefix = "global:" if acc_realm == "global" else "cn:"
+        out = []
+        for m in models_raw:
+            mid = m.get("id")
+            if not mid or str(mid).lower() == "auto":
+                continue
+            if allowed is not None:
+                if mid not in allowed:
+                    continue
+            elif not _is_model_allowed(db, mid):
+                continue
+            out.append({
+                "id": prefix + str(mid),
+                "object": "model",
+                "owned_by": "workbuddy" if acc_realm == "global" else "codebuddy",
+                "name": m.get("name") or mid,
+                "credit_multiplier": backend.CredentialManager._parse_credit_multiplier(m.get("credits"))
+                if hasattr(backend.CredentialManager, "_parse_credit_multiplier") else None,
+            })
+        return out
+
     allowed = _key_group_models(db, key)
     # 换号重试 + 错误处置，与对话端点同口径。
     #
@@ -3497,51 +3741,55 @@ def models(
     # 上游网络卡住时，早一点如实报错比长时间无响应更有用。
     tried_ids: set[int] = set()
     last_err = ""
+    data: list[dict] = []
     max_try = max(1, min(settings.MAX_ROTATE, _MODELS_MAX_TRY))
-    for attempt in range(max_try):
+    # 双域模式下每个 realm 都拉一次（账号 realm 由 _select_account 的 require_realm 过滤）。
+    wanted_realms = [list_realm] if list_realm else ["cn", "global"]
+    for want in wanted_realms:
+        acc = _select_account(db, exclude_ids=tried_ids, min_balance=0,
+                              require_realm=want)
         if acc is None:
-            break
-        try:
-            with backend.AccountSession(acc.auth_json) as sess:
-                models_raw = sess.fetch_models()
-                acc.auth_json = sess.updated_json()
-            acc.last_used_at = datetime.utcnow()
-            # 注意参数顺序是 (db, acc) —— 写反了会把 Session 当账号用，
-            # 报 "'Session' object has no attribute 'breaker_fails'"，而且因为
-            # 在 try 里会被当成「取模型失败」→ 502，很难一眼看出是参数顺序问题。
-            _note_success(db, acc)
-            db.commit()
-            data = [{
-                "id": m.get("id"),
-                "object": "model",
-                "owned_by": "codebuddy",
-                "name": m.get("name") or m.get("id"),
-                "credit_multiplier": backend.CredentialManager._parse_credit_multiplier(m.get("credits"))
-                if hasattr(backend.CredentialManager, "_parse_credit_multiplier") else None,
-            } for m in models_raw
-                if m.get("id")
-                and m.get("id", "").lower() != "auto"
-                and (m.get("id") in allowed if allowed is not None else _is_model_allowed(db, m.get("id")))]
-            return {"object": "list", "data": data, "source": "backend"}
-        except Exception as e:
-            last_err = str(e)
-            # 与对话端点同一套处置：先分类，再按分类冷却/计数/禁用。
-            # 401 → session_dead 连续计数，达阈值自动禁用；
-            # 其余按各自分类（限流冷却、WAF 等）。
-            kind = _classify_error(_extract_http_status(last_err), last_err)
-            try:
-                _apply_account_policy(db, acc, kind, _extract_http_status(last_err), last_err)
-            except Exception:
-                db.rollback()
-            tried_ids.add(acc.id)
-            if attempt + 1 >= max_try:
-                acc = None
+            # 该 realm 无账号 → 跳过；双域模式 CN 失败也不能让整个列表 502。
+            if list_realm:
+                return JSONResponse(status_code=503, content={
+                    "error": {"message": f"号池中没有 {want} 版本账号"
+                                         f"（realm={want}；已有账号均为其它版本）",
+                              "type": "no_account"}})
+            continue
+        got = False
+        for attempt in range(max_try):
+            if acc is None:
                 break
-            # 换一个号再试（排除已失败的）。
-            # 第二次放宽 min_balance：模型列表不消耗积分，
-            # 余额为 0 的号也能正常列模型，不该因此被排除。
-            acc = (_select_account(db, exclude_ids=tried_ids)
-                   or _select_account(db, exclude_ids=tried_ids, min_balance=0))
-    return JSONResponse(status_code=502, content={
-        "error": {"message": f"获取模型失败（已尝试 {len(tried_ids)} 个账号）：{last_err[:200]}",
-                  "type": "upstream"}})
+            try:
+                data.extend(_own_models(acc, want))
+                acc.last_used_at = datetime.utcnow()
+                _note_success(db, acc)
+                db.commit()
+                got = True
+                break
+            except Exception as e:
+                last_err = str(e)
+                # 与对话端点同一套处置：先分类，再按分类冷却/计数/禁用。
+                # 401 → session_dead 连续计数，达阈值自动禁用；
+                # 其余按各自分类（限流冷却、WAF 等）。
+                kind = _classify_error(_extract_http_status(last_err), last_err)
+                try:
+                    _apply_account_policy(db, acc, kind, _extract_http_status(last_err), last_err)
+                except Exception:
+                    db.rollback()
+                tried_ids.add(acc.id)
+                if attempt + 1 >= max_try:
+                    acc = None
+                    break
+                # 换一个号再试（排除已失败的）。
+                # 第二次放宽 min_balance：模型列表不消耗积分，
+                # 余额为 0 的号也能正常列模型，不该因此被排除。
+                acc = (_select_account(db, exclude_ids=tried_ids, min_balance=0,
+                                       require_realm=want))
+        if not got:
+            if list_realm:
+                return JSONResponse(status_code=502, content={
+                    "error": {"message": f"获取模型失败（已尝试 {len(tried_ids)} 个账号）：{last_err[:200]}",
+                              "type": "upstream"}})
+            # 双域模式：某一 realm 拉取失败不阻塞另一 realm 的列表。
+    return {"object": "list", "data": data, "source": "backend"}
