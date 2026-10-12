@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from admin import backend, jobrunner, wb_login
+from admin import backend, jobrunner, realm as realm_mod, wb_login
 from admin.config import settings
 from admin.db import SessionLocal, get_db
 from admin.models import Account, AccountModelCooldown, ModelConfig, UsageLog
@@ -221,6 +221,17 @@ def _apply_meta(acc: Account, auth_json: str, profile: dict | None = None,
         acc.enterprise_id = eid
     if meta.get("domain"):
         acc.domain = meta["domain"]
+    # realm 随凭证域重判（落库用纯推导 resolve_realm，不受逃生门影响）。
+    # 凭证里显式 realm 字段优先（未来全球版登录会带上）。
+    try:
+        cred = json.loads(auth_json)
+        inner = cred.get("auth") if isinstance(cred, dict) else None
+        if not isinstance(inner, dict):
+            inner = cred if isinstance(cred, dict) else {}
+        acc.realm = realm_mod.resolve_realm(
+            inner.get("realm"), meta.get("domain") or (inner.get("domain")))
+    except Exception:
+        acc.realm = realm_mod.resolve_realm(None, meta.get("domain"))
     # 余额：拿不到就不动（绝不写 0 覆盖掉已知的真实值）
     if balance:
         acc.balance_total = int(balance.get("total") or 0)
@@ -417,6 +428,7 @@ def list_accounts(_: bool = Depends(require_admin), db: Session = Depends(get_db
             "uid": a.uid,
             "enterprise_id": a.enterprise_id,
             "domain": a.domain,
+            "realm": a.realm or "cn",
             "status": a.status,
             "balance_total": a.balance_total,
             "balance_remain": a.balance_remain,
@@ -1213,7 +1225,12 @@ def cat_travel_batch_async(
         q = db.query(Account).filter(Account.status == "active")
         if body.ids:
             q = q.filter(Account.id.in_(body.ids))
-        ids = [a.id for a in q.order_by(Account.id).all()]
+        rows = q.order_by(Account.id).all()
+        # D4 门控：global 账号无猫猫旅行（CN 活动体系），源头排除不上游
+        from admin.scheduler import _task_realm
+        eligible = [a for a in rows if _task_realm(a) != "global"]
+        skipped_global = len(rows) - len(eligible)
+        ids = [a.id for a in eligible]
     finally:
         db.close()
 
@@ -1264,6 +1281,7 @@ def cat_travel_batch_async(
             db.close()
         return {
             "total": len(ids),
+            "skipped_global": skipped_global,
             "credits": buckets["adopt_credits"] + buckets["travel_credits"],
             "succeeded": sum(1 for r in job.items if r.get("ok")),
             "buckets": buckets,

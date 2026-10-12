@@ -46,6 +46,27 @@ def _short_error(e) -> str:
     return msg[:160]
 
 
+def _task_realm(a) -> str:
+    """账号的任务域 realm（含逃生门语义）。
+
+    优先读 accounts.realm 列（迁移时已按 domain 回填）；空则现判
+    （老库未迁移 / 手插的行）。返回 'cn' / 'global'。
+    scheduler 的 D4 门控统一走这里，不各处重复判定。
+    """
+    r = str(getattr(a, "realm", "") or "").strip().lower()
+    if r in ("cn", "global"):
+        return r
+    from admin import realm as realm_mod
+    try:
+        auth = json.loads(getattr(a, "auth_json", "") or "{}")
+        inner = auth.get("auth") if isinstance(auth, dict) else None
+        if not isinstance(inner, dict):
+            inner = auth if isinstance(auth, dict) else {}
+        return realm_mod.realm_of(inner)
+    except Exception:
+        return "cn"
+
+
 def _dump_result(result: dict) -> str:
     """序列化任务结果。
 
@@ -390,10 +411,16 @@ def run_growth_tasks() -> dict:
         accounts = (db.query(Account)
                     .filter(Account.status == "active")
                     .order_by(Account.id.asc()).all())
-        ids = [a.id for a in accounts]
+        # D4 门控：global 账号无成长任务体系（growthEvent 是 CN 活动体系），
+        # 从源头排除——不发起任何上游调用。摘要里如实计入跳过数。
+        eligible = [a for a in accounts if _task_realm(a) != "global"]
+        skipped_global = len(accounts) - len(eligible)
+        ids = [a.id for a in eligible]
         if not ids:
+            msg = "没有可用账号" if not skipped_global else \
+                f"全部 {skipped_global} 个国际版账号无成长任务，已跳过"
             return {"task": "run_growth_tasks", "ok": True, "accounts": 0,
-                    "msg": "没有可用账号"}
+                    "skipped_global": skipped_global, "msg": msg}
 
         run_res = growth_router.run_accounts(
             ids, None, db,
@@ -439,6 +466,7 @@ def run_growth_tasks() -> dict:
         "task": "run_growth_tasks",
         "ok": True,
         "accounts": len(ids),
+        "skipped_global": skipped_global,
         "tasks_done": fired,
         "credit": credit,
         "energy": energy,
@@ -462,6 +490,8 @@ def _growth_summary(r: dict) -> str:
         parts.append(f"+{r['energy']} 能量")
     if not done:
         parts.append("本轮无待做任务")
+    if r.get("skipped_global"):
+        parts.append(f"{r['skipped_global']} 个国际版账号无此活动已跳过")
     bad = [d for d in (r.get("detail") or []) if not d.get("ok")]
     if bad:
         who = "；".join(f"{d['account']}（{d['reason']}）" for d in bad[:3])
@@ -539,6 +569,16 @@ def run_daily_checkin(db, schedule: "Schedule | None" = None) -> dict:
 
     for a in accounts:
         label = _account_label(a)
+        # D4 门控（镜像 Go scheduler L271）：realm=global 账号无签到体系，
+        # 直接跳过——不发起任何上游调用（避免风控）。逃生门（global.enabled=0）
+        # 下 global 账号已被 realm_of 降级为 cn，这里按 cn 处理，语义一致。
+        if _task_realm(a) == "global":
+            skipped_already += 1
+            reason = "国际版无此活动"
+            detail.append({"account_id": a.id, "account": label,
+                           "ok": True, "status": "realm_skipped",
+                           "credit": 0, "reason": reason})
+            continue
         try:
             with AccountSession(a.auth_json) as sess:
                 st = sess.get_checkin_status()

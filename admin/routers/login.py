@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from admin import wb_login
+from admin import realm as realm_mod
 from admin.db import get_db
 from admin.models import Account
 from admin.ratelimit import get_client_ip
@@ -260,6 +261,9 @@ def _store_locked(credential: str, meta: dict, balance: dict, uid: str,
         existing.uid = uid or existing.uid
         existing.enterprise_id = meta.get("enterprise_id") or ""
         existing.domain = meta.get("domain") or ""
+        # realm 随凭证域重判（落库用纯推导 resolve_realm，不受逃生门影响）
+        existing.realm = realm_mod.resolve_realm(
+            meta.get("realm"), meta.get("domain"))
         # 昵称缺失时凭证里常是字面量 "null"（本机真实凭证即如此），
         # 统一用 _clean_nick 归一，避免把 "null" 当昵称写进号池。
         nick = _clean_nick(meta.get("nickname"))
@@ -298,6 +302,7 @@ def _store_locked(credential: str, meta: dict, balance: dict, uid: str,
     acc.uid = uid
     acc.enterprise_id = meta.get("enterprise_id") or ""
     acc.domain = meta.get("domain") or ""
+    acc.realm = realm_mod.resolve_realm(meta.get("realm"), meta.get("domain"))
     # 命名优先级：上游昵称 → 手机号 → uid（都用 _clean_nick 归一化，滤掉 "null"）
     acc.name = (_clean_nick(meta.get("nickname")) or _clean_nick(meta.get("phone"))
                 or uid or "未命名")
@@ -490,6 +495,32 @@ def _run_post_login_automation(account_id: int, name: str) -> None:
             return
         log.info("wb_login: 登录后收尾开始 id=%s name=%s", account_id, name)
         _t0 = _t.time()
+
+        # ---- 0) realm 分叉：global 账号只有 trial 领取 + 余额刷新 ----
+        # （D4 语义：国际版无签到/猫猫/成长任务，growthEvent 是 CN 活动体系；
+        #   Go PLAN D4 同此，global 唯一天然增益 = trial 加油包）
+        with backend.AccountSession(acc.auth_json) as first_sess:
+            acc_realm = first_sess.realm
+            if acc_realm == "global":
+                try:
+                    r = first_sess.claim_trial()
+                    log.info("wb_login: 收尾-global trial id=%s claimed=%s already=%s",
+                             account_id, r.get("claimed"), r.get("already"))
+                except Exception as e:
+                    log.warning("wb_login: 收尾-trial 失败 id=%s: %s", account_id, e)
+                try:
+                    bal = first_sess.fetch_balance()
+                    acc.balance_total = int(bal.get("total", 0) or 0)
+                    acc.balance_remain = int(bal.get("remain", 0) or 0)
+                    acc.auth_json = first_sess.updated_json()
+                except Exception as e:
+                    log.warning("wb_login: 收尾-global 余额刷新失败 id=%s: %s",
+                                account_id, e)
+                acc.last_sync_at = datetime.utcnow()
+                db.commit()
+                log.info("wb_login: 收尾完成（global 只做 trial+余额） id=%s 用时%.0fs",
+                         account_id, _t.time() - _t0)
+                return
 
         # ---- 1) 猫猫旅行（领养 +300 / 派猫 / 领奖）----
         try:

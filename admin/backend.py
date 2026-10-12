@@ -26,6 +26,7 @@ if _ROOT not in sys.path:
 
 from wb_install import WB  # noqa: E402  安装位置 / 版本号 / 风控配置自动发现
 from admin import client_profile as cprofile  # noqa: E402  客户端参数档案（可后台配置/同步）
+from admin import realm as realm_mod  # noqa: E402  双域端点分派（CN/Global）
 
 # ---------------------------------------------------------------------------
 # Ardot 画布（create_canvas）—— 真实 id 的解析口径
@@ -221,23 +222,113 @@ class AccountSession:
         with open(self._path, "w", encoding="utf-8") as f:
             f.write(auth_json)
         self.cm = CredentialManager(Path(self._path))
+        # realm 判定一次、全链路复用（判定语义见 admin/realm.py；含逃生门）。
+        # 用 auth 段的 domain 判（www.workbuddy.ai → global），显式 realm 字段优先。
+        self._realm = realm_mod.realm_of(self._auth_dict())
+
+    # -- realm 分派 ---------------------------------------------------------
+
+    def _auth_dict(self) -> dict:
+        try:
+            return (self.cm._session() or {}).get("auth") or {}
+        except Exception:
+            return {}
+
+    @property
+    def realm(self) -> str:
+        return self._realm
+
+    def _chat_base(self) -> str:
+        """chat/growth/plugin 域基址（CN=copilot.tencent.com / Global=workbuddy.ai）。"""
+        return realm_mod.chat_base(self._realm)
+
+    def _billing_base(self) -> str:
+        """billing 域基址（CN=codebuddy.cn / Global=workbuddy.ai）。"""
+        return realm_mod.billing_base(self._realm)
+
+    def _chat_completions_url(self) -> str:
+        """chat 补全 URL（Global 首路径 /console，404/405 回落 /v2——照 Go ChatStream）。"""
+        return self._chat_base() + realm_mod.chat_paths(self._realm)[0]
 
     def get_headers(self, extra: dict | None = None) -> dict:
         return self.cm.get_headers(extra=extra)
 
+    def _chat_get_json(self, path: str) -> dict:
+        """chat 域 GET（realm 基址 + 现有鉴权头）；非 200 / 非 0 抛 RuntimeError。
+
+        CN 与 cm._request_backend 等价（同 base 同路径零回归）；
+        Global 必须走这里（token 只在 workbuddy.ai 有效）。
+        """
+        headers = self.cm.get_headers()
+        url = self._chat_base().rstrip("/") + path
+        try:
+            with httpx.Client(timeout=15, limits=HTTP_LIMITS) as c:
+                r = c.get(url, headers=headers)
+        except Exception as e:
+            raise RuntimeError(f"后端请求网络失败 GET {path}: {e}")
+        try:
+            data = r.json()
+        except Exception as e:
+            raise RuntimeError(f"后端返回非 JSON GET {path} HTTP {r.status_code}: {r.text[:200]}")
+        if r.status_code != 200 or data.get("code") != 0:
+            raise RuntimeError(f"后端请求失败 GET {path}: HTTP {r.status_code} / {data.get('msg', data)}")
+        return data
+
     def fetch_models(self) -> list:
-        return self.cm.fetch_models()
+        """模型目录：realm 基址 + CN 现状路径（/v2/enterprises/{eid}/models）。
+
+        该路径形状两域同构（Go global 实测 /v2/enterprises/personal/models 200），
+        区别只在基址——CN=copilot.tencent.com，Global=workbuddy.ai。
+        """
+        eid = self.cm._enterprise_path_key()
+        data = self._chat_get_json(f"/v2/enterprises/{eid}/models")
+        payload = data.get("data", {})
+        models = payload.get("models")
+        if isinstance(models, list) and models:
+            return models
+        collected: list[dict] = []
+        for a in payload.get("agents", []) or []:
+            for m in a.get("models", []) or []:
+                if isinstance(m, dict) and m.get("id"):
+                    collected.append(m)
+                elif isinstance(m, str) and m:
+                    collected.append({"id": m})
+        seen = set()
+        result: list[dict] = []
+        for m in collected:
+            mid = m.get("id")
+            if mid and mid not in seen:
+                seen.add(mid)
+                result.append(m)
+        if not result:
+            raise RuntimeError("后端模型列表格式异常：缺少 data.models 且 agents 中无模型")
+        return result
 
     def fetch_model_busy(self, models: list[str]) -> dict:
         """Official desktop endpoint: at most 50 models, five-second timeout."""
         with httpx.Client(timeout=5) as client:
-            response = client.post(f"{BACKEND}/v2/chat/busy", json={"models": models},
+            response = client.post(f"{self._chat_base()}/v2/chat/busy", json={"models": models},
                                    headers=self.get_headers(cprofile.risk_headers()))
         response.raise_for_status()
         return response.json()
 
     def fetch_balance(self) -> dict:
-        return self.cm.fetch_balance()
+        """积分汇总：billing/meter 族走 realm 基址 + 路径候选。
+
+        CN 现状是 copilot.tencent.com + /v2（cm._request_backend 直连），
+        Go 上游口径是 codebuddy.cn + /v2——两个 CN 域都承载该端点，
+        这里统一到 Go 口径（billing 基址 + /v2），与 realm 候选机制一致。
+        """
+        data = self._billing_meter({}, kind="user-resource")
+        resp = (data.get("data") or {}).get("Response", {}).get("Data", {}) or {}
+        total = 0
+        total_size = 0
+        for a in resp.get("Accounts") or []:
+            if a.get("CapacityUnit") != "credits":
+                continue
+            total += a.get("CycleCapacityRemain") or 0
+            total_size += a.get("CapacitySize") or 0
+        return {"total": total_size, "remain": total}
 
     def fetch_account_profile(self) -> dict:
         """用**上游**取这个凭证对应的真实账号信息（uid / 昵称 / 手机号）。
@@ -294,13 +385,52 @@ class AccountSession:
         return collect_billing(self.cm._request_backend)
 
     def fetch_request_usage(self, start_time: str, end_time: str, page_num: int = 1, page_size: int = 10) -> dict:
-        """获取模型请求用量（对接 WorkBuddy 已有接口，不自建日志）。"""
-        return self.cm._request_backend("POST", "/billing/meter/get-user-request-usage", {
+        """获取模型请求用量（对接 WorkBuddy 已有接口，不自建日志）。
+
+        billing/meter 族：走 billing 基址（CN=codebuddy.cn / Global=workbuddy.ai）
+        与 realm 路径候选（Global 无 /v2 前缀优先，404 回落 /v2——两侧方向相反）。
+        """
+        return self._billing_meter("get-user-request-usage", {
             "startTime": start_time,
             "endTime": end_time,
             "pageNum": page_num,
             "pageSize": page_size,
         })
+
+    def _billing_meter(self, suffix: str, body: dict | None = None,
+                       kind: str = "user-resource") -> dict:
+        """billing/meter 域请求：按 realm 路径候选逐个尝试（soft：业务码原样返回）。
+
+        镜像 Go billingMeterPaths 的语义：global 首选无 /v2 前缀、404 回落 /v2；
+        cn 只有 /v2（单候选，现状零回归）。kind 决定路径族
+        （user-resource / daily-checkin / get-user-request-usage 同族）。
+        """
+        headers = self._billing_headers()
+        base = self._billing_base().rstrip("/")
+        paths = realm_mod.billing_paths(self._realm, kind) if kind in ("user-resource", "daily-checkin") \
+            else [f"/v2/billing/meter/{suffix}", f"/billing/meter/{suffix}"]
+        last: dict = {}
+        for i, path in enumerate(paths):
+            # 非首候选沿用已判定的方向；这里统一先 /v2 后无前缀（usage 族 CN 现状优先）
+            url = base + path
+            try:
+                with httpx.Client(timeout=15, limits=HTTP_LIMITS) as c:
+                    r = c.post(url, headers=headers, json=body or {})
+            except Exception as e:
+                last = {"code": None, "msg": f"网络失败: {e}", "data": {}}
+                continue
+            try:
+                payload = r.json()
+            except Exception:
+                payload = {}
+            # 404/405 且还有候选 → 换下一条路径（方向回落的唯一合法触发）
+            if r.status_code in (404, 405) and i < len(paths) - 1:
+                last = {"code": None, "msg": f"HTTP {r.status_code}", "data": {}}
+                continue
+            if r.status_code != 200:
+                return {"code": payload.get("code"), "msg": payload.get("msg") or f"HTTP {r.status_code}", "data": {}}
+            return payload
+        return last or {"code": None, "msg": "全部候选路径失败", "data": {}}
 
     # -----------------------------------------------------------------------
     # 每日签到领取 100 积分（Buddy 加油站活动）
@@ -312,8 +442,32 @@ class AccountSession:
         返回后端 data 字段（含 active / today_checked_in / end_time / activity_name 等）。
         end_time 即活动结束时间，是「下次停止领取」配置的依据。
         """
-        data = self.cm._request_backend_soft("POST", "/v2/billing/meter/checkin-activity-status", {})
+        data = self._billing_meter_status("checkin-activity-status")
         return data.get("data") or {}
+
+    def _billing_meter_status(self, suffix: str) -> dict:
+        """checkin-activity-status 查询：同 _billing_meter 的路径候选，GET 语义用 POST 空体。"""
+        headers = self._billing_headers()
+        base = self._billing_base().rstrip("/")
+        paths = [f"/v2/billing/meter/{suffix}", f"/billing/meter/{suffix}"]
+        last: dict = {}
+        for i, path in enumerate(paths):
+            try:
+                with httpx.Client(timeout=15, limits=HTTP_LIMITS) as c:
+                    r = c.post(base + path, headers=headers, json={})
+            except Exception as e:
+                last = {"code": None, "msg": f"网络失败: {e}", "data": {}}
+                continue
+            try:
+                payload = r.json()
+            except Exception:
+                payload = {}
+            if r.status_code in (404, 405) and i < len(paths) - 1:
+                continue
+            if r.status_code != 200:
+                return {"code": payload.get("code"), "msg": payload.get("msg") or f"HTTP {r.status_code}", "data": {}}
+            return payload
+        return last or {"code": None, "msg": "全部候选路径失败", "data": {}}
 
     def claim_daily_checkin(self) -> dict:
         """执行每日签到领取。
@@ -321,7 +475,7 @@ class AccountSession:
         成功返回 {"ok": True, "credit": int, "streak_days": int}；
         业务失败（已领/无资格/活动结束）返回 {"ok": False, "code": int, "status": str}。
         """
-        data = self.cm._request_backend_soft("POST", "/v2/billing/meter/daily-checkin", {})
+        data = self._billing_meter({}, kind="daily-checkin")
         code = data.get("code")
         payload = data.get("data") or {}
         if code and code != 0:
@@ -333,6 +487,52 @@ class AccountSession:
         if streak is None:
             streak = data.get("streak_days")
         return {"ok": True, "credit": credit or 0, "streak_days": streak or 0}
+
+    # -----------------------------------------------------------------------
+    # Global 一次性 trial 加油包（吸收 Go trial.go 语义）
+    # -----------------------------------------------------------------------
+
+    #: 幂等码 14051「已领取过」的两种指纹（Go trialAlreadyMarkers 逐字对照）：
+    #: HTTP 200 + 业务 code≠0 时在 msg 里，HTTP ≥400 时在原始 JSON body 里。
+    TRIAL_ALREADY_MARKERS = ("code=14051", '"code":14051')
+    TRIAL_PATH = "/billing/ide/trial"
+
+    def claim_trial(self) -> dict:
+        """领取 Global 一次性 trial 加油包（POST {billingBase}/billing/ide/trial）。
+
+        仅 Global 账号可调（CN 无此端点；防御性：非 global 返回 not_applicable）。
+        返回 {"claimed": bool, "already": bool, "msg": str}：
+          claimed=True —— 本次新领成功；
+          already=True —— 幂等码 14051 已领过（正常，非失败）；
+          其余为失败（msg 带上游原因）。
+        这是 Global 唯一天然的积分增益动作（无签到/任务中心，Go PLAN D4）。
+        """
+        if self._realm != "global":
+            return {"claimed": False, "already": False,
+                    "msg": "仅国际版账号可领取 trial 加油包"}
+        if not self._token_str():
+            return {"claimed": False, "already": False,
+                    "msg": "凭证未就绪（token 缺失或加密，需先走登录/导入流程）"}
+        headers = self._billing_headers()
+        url = self._billing_base().rstrip("/") + self.TRIAL_PATH
+        try:
+            with httpx.Client(timeout=20, limits=HTTP_LIMITS) as c:
+                r = c.post(url, headers=headers, json={})
+        except Exception as e:
+            return {"claimed": False, "already": False, "msg": f"网络失败: {e}"}
+        body_text = r.text or ""
+        # 幂等判定先于一切错误分类（Go trialAlreadyErr 同序）
+        if any(m in body_text for m in self.TRIAL_ALREADY_MARKERS):
+            return {"claimed": False, "already": True, "msg": "已领取过（幂等）"}
+        try:
+            payload = r.json()
+        except Exception:
+            payload = {}
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if r.status_code == 200 and code == 0:
+            return {"claimed": True, "already": False, "msg": "领取成功"}
+        return {"claimed": False, "already": False,
+                "msg": f"HTTP {r.status_code} code={code} {str(payload.get('msg'))[:120] if isinstance(payload, dict) else body_text[:120]}"}
 
     # -----------------------------------------------------------------------
     # 猫猫旅行（/activity/growth/buddy/*）
@@ -349,9 +549,12 @@ class AccountSession:
 
         与 billing 域的 `_request_backend_soft` 不同：growth 域的「门槛未达」
         等业务失败走 HTTP 400，需要调用方读取 msg 判定，故这里把结果结构化返回。
+
+        域基址随 realm 切（CN=copilot.tencent.com / Global=workbuddy.ai）；
+        growth 路径（/activity/growth/*）两域同形，无 /v2 前缀分叉（Go 注释）。
         """
         headers = self.cm.get_headers()
-        url = f"{BACKEND}{path}"
+        url = f"{self._chat_base()}{path}"
         try:
             with httpx.Client(timeout=15, limits=HTTP_LIMITS) as c:
                 if method.upper() == "GET":
@@ -682,7 +885,7 @@ class AccountSession:
         headers["Content-Type"] = "application/json"
         try:
             with httpx.Client(timeout=60, limits=HTTP_LIMITS) as c:
-                with c.stream("POST", f"{BACKEND}/v2/chat/completions",
+                with c.stream("POST", self._chat_completions_url(),
                               headers=headers, json=body) as r:
                     status = r.status_code
                     # 读完（或读到足够判断的量）后关闭，避免连接悬挂
@@ -725,14 +928,24 @@ class AccountSession:
         return self._sess_auth().get("domain") or "copilot.tencent.com"
 
     def _billing_headers(self) -> dict:
-        """billing 域头：CLI 形状。"""
+        """billing 域头：CLI 形状（Origin/Referer 随 realm 的 billing 基址切）。
+
+        token 取不出（凭证加密/缺失）时给空串——让上游用 401 回答，
+        而不是在本地抛 TypeError 把整批任务炸掉。
+        """
+        base = self._billing_base()
+        tok = self._sess_auth().get("accessToken") or ""
+        if not isinstance(tok, str):
+            # 桌面端新版本把 .info 字段加密成 {$wbEncrypted:...} 信封；
+            # 交给正式的凭证导入/登录流程处理，这里不猜。
+            tok = ""
         return {
-            "Authorization": "Bearer " + (self._sess_auth().get("accessToken") or ""),
+            "Authorization": f"Bearer {tok}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
-            "Origin": BILL_BASE,
-            "Referer": BILL_BASE + "/",
+            "Origin": base,
+            "Referer": base + "/",
             "X-User-Id": self._uid(),
             "X-Domain": self._domain(),
         }
@@ -744,7 +957,7 @@ class AccountSession:
         copilot.tencent.com，发往 www.workbuddy.cn 会造成跨域不一致。
         """
         return {
-            "Authorization": "Bearer " + (self._sess_auth().get("accessToken") or ""),
+            "Authorization": f"Bearer {self._token_str()}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "x-client-platform": "web",
@@ -763,7 +976,7 @@ class AccountSession:
             m = dict(e)
             m.setdefault("userId", uid)
             arr.append(m)
-        return self._post_report(BILL_BASE + "/v2/report",
+        return self._post_report(self._billing_base() + "/v2/report",
                                  self._billing_headers(), arr)
 
     def report_web_event(self, event_code: str, page_url: str,
@@ -825,22 +1038,28 @@ class AccountSession:
             "web_element_click", LIBRARY_DOC_URL,
             "library_doc_intro_click", "WorkBuddy资料库介绍")
 
+    def _token_str(self) -> str:
+        """accessToken 安全取值：缺失/加密信封（dict）→ 空串。"""
+        tok = self._sess_auth().get("accessToken") or ""
+        return tok if isinstance(tok, str) else ""
+
     def _chat_headers(self) -> dict:
         """chat 域头：市场/场景等接口用（CLI 形状，X-Domain 走账号自己的域）。"""
+        base = self._billing_base()
         return {
-            "Authorization": "Bearer " + (self._sess_auth().get("accessToken") or ""),
+            "Authorization": f"Bearer {self._token_str()}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
-            "Origin": BILL_BASE,
-            "Referer": BILL_BASE + "/",
+            "Origin": base,
+            "Referer": base + "/",
             "X-User-Id": self._uid(),
             "X-Domain": self._domain(),
         }
 
     def _chat_json(self, path: str, body: dict | None = None) -> dict:
         """向 chat 域发请求并返回 data 段；失败返回 {}。"""
-        url = BACKEND.rstrip("/") + path
+        url = self._chat_base().rstrip("/") + path
         try:
             with httpx.Client(timeout=25, limits=HTTP_LIMITS) as c:
                 if body is None:
@@ -1051,7 +1270,7 @@ class AccountSession:
             "X-Request-ID": stable_device_id(self._uid(), "req")
                             + str(time.time_ns() % 1000000),
             "X-User-Id": self._uid(),
-            "Authorization": "Bearer " + (self._sess_auth().get("accessToken") or ""),
+            "Authorization": f"Bearer {self._token_str()}",
         }
 
     def _desktop_fingerprint(self) -> dict:
@@ -1087,7 +1306,7 @@ class AccountSession:
             m = dict(e)
             m.update(fp)
             arr.append(m)
-        url = BACKEND.rstrip("/") + "/v2/report"
+        url = self._chat_base().rstrip("/") + "/v2/report"
         try:
             with httpx.Client(timeout=25, limits=HTTP_LIMITS) as c:
                 r = c.post(url, headers=self._desktop_headers(), json=arr)
@@ -1396,7 +1615,7 @@ class AccountSession:
     def _ardot_connector_headers(self) -> dict:
         """调 connector/oauth 接口所需的头（账号自身凭据 + 业务域）。"""
         return {
-            "Authorization": "Bearer " + (self._sess_auth().get("accessToken") or ""),
+            "Authorization": f"Bearer {self._token_str()}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "X-Domain": self._domain() or "www.workbuddy.cn",
@@ -1407,11 +1626,12 @@ class AccountSession:
         }
 
     def _ardot_connector_bases(self) -> list[str]:
-        """候选基址：账号业务域优先，再回落 copilot 域（与官方同序）。"""
+        """候选基址：账号业务域优先，再回落 chat 基址（与官方同序）。"""
         domain = self._domain() or "www.workbuddy.cn"
         bases = [f"https://{domain}"]
-        if BACKEND not in bases:
-            bases.append(BACKEND)
+        cb = self._chat_base()
+        if cb not in bases:
+            bases.append(cb)
         return bases
 
     def ardot_status(self) -> str:
