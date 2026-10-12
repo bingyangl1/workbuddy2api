@@ -395,6 +395,7 @@ def login_status(sid: str, _: bool = Depends(require_admin)):
         "mobile": sess.mobile,
         "code_sent": bool(sess.sms_state_token),
         "age": int(time.time() - sess.created),
+        "realm": sess.realm,
     }
 
 
@@ -420,10 +421,16 @@ class JoinIn(BaseModel):
     """自助端点入参。
 
     三个端点（start / send / verify）共用一个模型，各自只用到一部分字段。
+
+    `realm`：请求方声称的登录版本（'cn' | 'global'）。短信流恒 CN；
+    传入后与**会话发起时记录的 realm** 做一致性校验（镜像 Go
+    validateRealmMatch：url 与 poll 必须同域，防跨版本 token 串写）。
+    为空 = 未声明，按会话自身 realm 处理（存量前端零回归）。
     """
     sid: Optional[str] = ""
     mobile: str = ""
     sms_code: str = ""
+    realm: Optional[str] = ""
 
 
 def _mask_name(name: str) -> str:
@@ -653,24 +660,42 @@ def _upstream_slot(reason: str):
 
 @public_router.post("/api/join/start")
 def join_start(body: JoinIn, request: Request):
-    """公开：发起一次注册会话。"""
+    """公开：发起一次注册会话。
+
+    `realm`：短信流恒 CN；显式传 global 会被拒（国际版走官方接力流，
+    见 /api/join/official/start）。传空 = CN（存量前端零回归）。
+    """
+    realm = (body.realm or "cn").strip().lower()
+    if realm != "cn":
+        raise HTTPException(status_code=400, detail={
+            "message": "手机号注册仅支持国内版；国际版请使用官方页面接力"
+                       "（/api/join/official/start 传 realm=global）",
+            "step": "realm_unsupported", "reason": "realm_unsupported"})
     with _upstream_slot("join_start"):
         try:
             sess = wb_login.start_login()
         except wb_login.WbLoginError as e:
             raise _fail(e, 502)
-    return {"sid": sess.sid}
+    return {"sid": sess.sid, "auth_url": sess.plugin_auth_url,
+            "realm": sess.realm}
 
 
 @public_router.post("/api/join/send")
 def join_send(body: JoinIn, request: Request):
     """公开：发短信验证码。"""
+    try:
+        sess = wb_login.get_session(body.sid)
+    except wb_login.WbLoginError as e:
+        raise _fail(e, 502)
+    try:
+        wb_login.validate_realm_match(sess.realm, body.realm)
+    except wb_login.WbLoginError as e:
+        raise _fail(e, 502)
     ip = get_client_ip(request.headers.get("x-forwarded-for"),
                        request.client.host if request.client else None)
     mobile = wb_login.normalize_mobile(body.mobile)
     _check_sms_quota(ip, mobile)
     try:
-        sess = wb_login.get_session(body.sid)
         with _upstream_slot("send"):
             out = wb_login.send_sms(sess, body.mobile)
     except wb_login.WbLoginError as e:
@@ -697,6 +722,7 @@ def join_verify(body: JoinIn, request: Request, db: Session = Depends(get_db)):
         sess = wb_login.get_session(body.sid)
     except wb_login.WbLoginError as e:
         raise _fail(e, 502)
+    wb_login.validate_realm_match(sess.realm, body.realm)
 
     out = _verify_and_store(sess, body.sms_code, db)
 
@@ -727,17 +753,31 @@ def join_verify(body: JoinIn, request: Request, db: Session = Depends(get_db)):
 
 class OfficialIn(BaseModel):
     sid: Optional[str] = ""
+    #: 请求方声称的登录版本（'cn' | 'global'）。发起与轮询必须一致，
+    #: 校验镜像 Go validateRealmMatch（state 落盘 realm vs 命令行 --realm）。
+    realm: Optional[str] = ""
 
 
 @public_router.post("/api/join/official/start")
 def join_official_start(body: OfficialIn, request: Request):
-    """公开：发起「官方页面接力」——只拿 state + authUrl。"""
+    """公开：发起「官方页面接力」——只拿 state + authUrl。
+
+    `realm` 支持 'cn' | 'global'（镜像 Go login --realm）：
+    global 走 www.workbuddy.ai 的 state 端点，返回的 authUrl 也指向
+    国际版登录页；传空 = cn。
+    """
+    realm = (body.realm or "cn").strip().lower()
+    if realm not in wb_login.VALID_LOGIN_REALMS:
+        raise HTTPException(status_code=400, detail={
+            "message": f"不支持的登录版本 {body.realm!r}（可选 cn / global）",
+            "step": "realm_unsupported", "reason": "realm_unsupported"})
     with _upstream_slot("official_start"):
         try:
-            sess = wb_login.start_official_login()
+            sess = wb_login.start_official_login(realm)
         except wb_login.WbLoginError as e:
             raise _fail(e, 502)
-    return {"sid": sess.sid, "auth_url": sess.plugin_auth_url}
+    return {"sid": sess.sid, "auth_url": sess.plugin_auth_url,
+            "realm": sess.realm}
 
 
 @public_router.post("/api/join/official/poll")
@@ -749,6 +789,7 @@ def join_official_poll(body: OfficialIn, request: Request, db: Session = Depends
       * `{"done": true, ...}`       已换到凭证并入库
       * 502                         会话失效等需要重新开始的错误
       * 400                         换到了凭证但未通过上游验证（伪造/失效）
+                                    —— 或轮询 realm 与发起 realm 不一致（防混域）
 
     并发保护：并发洪峰下闸门可能已满，此时**不报错**，直接回 `done=false`
     让前端下一轮再来 —— 轮询本来就是每 2.5s 一次，对用户完全无感。
@@ -757,6 +798,13 @@ def join_official_poll(body: OfficialIn, request: Request, db: Session = Depends
         sess = wb_login.get_session(body.sid)
     except wb_login.WbLoginError as e:
         raise _fail(e, 502)
+
+    # 防混域：轮询声称的 realm 必须与发起会话一致（镜像 Go validateRealmMatch，
+    # 在发起任何 token 请求**之前**校验）。会话 realm 为空（旧会话）放行。
+    try:
+        wb_login.validate_realm_match(sess.realm, body.realm)
+    except wb_login.WbLoginError as e:
+        raise _fail(e, 400)
 
     # 已成功过 -> 直接复用（幂等）
     with sess.lock:
@@ -772,7 +820,8 @@ def join_official_poll(body: OfficialIn, request: Request, db: Session = Depends
             # 闸门满了不算错误：轮询本来就每 2.5s 一次，静默回 done=false
             # 让前端下一轮再来，对用户完全无感。
             with _upstream_slot("poll"):
-                token = wb_login.fetch_credential_by_state(sess.plugin_state)
+                token = wb_login.fetch_credential_by_state(
+                    sess.plugin_state, realm=sess.realm)
         except HTTPException as he:
             if he.status_code == 503:
                 return {"done": False, "busy": True}
@@ -783,7 +832,8 @@ def join_official_poll(body: OfficialIn, request: Request, db: Session = Depends
             return {"done": False}
 
         try:
-            credential, meta = wb_login.build_credential_from_token(token)
+            credential, meta = wb_login.build_credential_from_token(
+                token, realm=sess.realm)
         except wb_login.WbLoginError as e:
             raise _fail(e, 502)
 

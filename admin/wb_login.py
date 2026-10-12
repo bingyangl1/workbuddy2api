@@ -80,6 +80,10 @@ _logger = logging.getLogger("admin.wb_login")
 
 #: 控制台/站点域。登录页、console 会话、plugin 端点都在这里。
 HOST = "https://www.workbuddy.cn"
+#: 国际版登录域（镜像 Go cmd/login realmConfig：global → www.workbuddy.ai，
+#: Origin/Referer 同域）。仅「官方页面接力」流支持 global —— 短信链的
+#: Keycloak/OneID 页面结构只在 workbuddy.cn 上实测过，不能盲切。
+GLOBAL_HOST = "https://www.workbuddy.ai"
 #: OneID（腾讯统一账号）域，短信接口在这里。
 OAUTH2 = "https://oauth2.account.tencent.com"
 
@@ -94,6 +98,33 @@ WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 SESSION_TTL = 900
 #: 允许跳转的上游域（跟随重定向时的白名单，防止被引到站外）。
 _ALLOWED_HOSTS = ("workbuddy.cn", "codebuddy.cn", "tencent.com")
+#: 国际版登录流的允许跳转域（workbuddy.ai 与它的 Keycloak/OneID 链）。
+_GLOBAL_ALLOWED_HOSTS = _ALLOWED_HOSTS + ("workbuddy.ai",)
+
+#: 登录会话支持的 realm。短信流恒 CN（见 GLOBAL_HOST 注释）；
+#: 官方接力流可选 CN/Global。
+VALID_LOGIN_REALMS = ("cn", "global")
+
+
+def _host_of(realm: str) -> str:
+    """按登录 realm 取上游 base。未归一的值一律回落 CN（fail-closed）。"""
+    r = (realm or "cn").strip().lower()
+    return GLOBAL_HOST if r == "global" else HOST
+
+
+def validate_realm_match(session_realm: str, claimed_realm: str) -> None:
+    """会话发起 realm 与后续步骤声称 realm 的一致性校验（镜像 Go validateRealmMatch）。
+
+    session_realm 为空（存量会话 / 未声明）放行；非空且不一致 → 抛 WbLoginError。
+    必须在发起任何上游请求**之前**调用，防跨版本 token 串写。
+    """
+    s = (session_realm or "").strip().lower()
+    c = (claimed_realm or "cn").strip().lower()
+    if s and s != c:
+        raise WbLoginError(
+            f"登录版本不一致：会话发起于 {s}，本次请求为 {c}"
+            f"（同一会话必须保持同一版本）",
+            step="realm_mismatch", reason="realm_mismatch")
 #: 单次 HTTP 超时（秒）。
 #:
 #: 分级取值，而不是一个 30s 打天下：登录链路的每一步都是**短小的 API 调用**
@@ -283,6 +314,9 @@ class PhoneLoginSession:
     sid: str
     client: httpx.Client
     created: float = field(default_factory=time.time)
+    #: 本会话发起的登录 realm（'cn' | 'global'；短信流恒 'cn'）。
+    #: 后续每一步（send/verify/poll）都会用它做 validate_realm_match 校验。
+    realm: str = "cn"
     #: 设备授权 state（换取客户端凭证的钥匙）。
     plugin_state: str = ""
     plugin_auth_url: str = ""
@@ -323,12 +357,15 @@ class PhoneLoginSession:
     # -- 内部 HTTP 小工具 --------------------------------------------------
 
     def _headers(self, extra: dict | None = None, referer: str | None = None) -> dict:
+        # Origin/Referer 随会话 realm 取（镜像 Go commonHeaders(origin)）：
+        # global → www.workbuddy.ai；cn → workbuddy.cn。
+        origin = _host_of(self.realm)
         h = {
             "User-Agent": WEB_UA,
             "Accept-Language": "zh-CN,zh;q=0.9",
             "Accept": "application/json, text/plain, */*",
-            "Origin": HOST,
-            "Referer": referer or (HOST + "/"),
+            "Origin": origin,
+            "Referer": referer or (origin + "/"),
         }
         h.update(extra or {})
         return h
@@ -340,8 +377,10 @@ class PhoneLoginSession:
         """跟随重定向链，只在本域白名单内跳。
 
         上游会把我们依次甩到 keycloak → OneID → console，全程都在
-        workbuddy.cn / tencent.com 上；一旦要跳去站外就停下（防被引走）。
+        workbuddy.cn / tencent.com（或 global 流的 workbuddy.ai）上；
+        一旦要跳去站外就停下（防被引走）。
         """
+        allowed = _GLOBAL_ALLOWED_HOSTS if self.realm == "global" else _ALLOWED_HOSTS
         cur, ref = url, referer
         resp = None
         for _ in range(max_hops):
@@ -353,7 +392,7 @@ class PhoneLoginSession:
                 return resp
             nxt = urllib.parse.urljoin(cur, loc)
             host = urllib.parse.urlparse(nxt).netloc
-            if not any(host.endswith(h) for h in _ALLOWED_HOSTS):
+            if not any(host.endswith(h) for h in allowed):
                 return resp
             ref, cur = cur, nxt
         return resp
@@ -495,7 +534,7 @@ def get_session(sid: str) -> PhoneLoginSession:
     return sess
 
 
-def _new_session() -> PhoneLoginSession:
+def _new_session(realm: str = "cn") -> PhoneLoginSession:
     client = httpx.Client(
         headers={"User-Agent": WEB_UA, "Accept-Language": "zh-CN,zh;q=0.9"},
         follow_redirects=False,
@@ -511,7 +550,10 @@ def _new_session() -> PhoneLoginSession:
                             keepalive_expiry=30.0),
     )
     sid = uuid.uuid4().hex
-    return PhoneLoginSession(sid=sid, client=client)
+    r = (realm or "cn").strip().lower()
+    if r not in VALID_LOGIN_REALMS:
+        r = "cn"
+    return PhoneLoginSession(sid=sid, client=client, realm=r)
 
 
 def _register_session(sess: PhoneLoginSession) -> None:
@@ -1139,7 +1181,7 @@ def credential_uid(credential_json: str) -> str:
 # 而且不受本服务出口 IP 的风控影响。
 
 
-def fetch_credential_by_state(state: str) -> dict | None:
+def fetch_credential_by_state(state: str, realm: str = "cn") -> dict | None:
     """轮询设备授权 state 换取凭证。
 
     返回凭证 dict（含 accessToken），未完成时返回 None。
@@ -1149,16 +1191,19 @@ def fetch_credential_by_state(state: str) -> dict | None:
 
     这是高频路径（前端每 2.5s 轮一次），所以**必须**过长超时 + 并发闸门：
     上游一慢，这些请求就会把工作线程占满并拖垮整个服务。
+
+    `realm` 选择轮询的上游域（官方接力流可 global；默认 cn 零回归）。
     """
     # 闸门由**路由层**统一持有（见 admin/routers/login.py 的 `_upstream_slot`）：
     # 一个请求占一个名额，而不是每次上游调用都占 —— 避免嵌套获取名额导致
     # 可用容量被腰斩，也更容易推理「同时在途的登录请求数」。
+    host = _host_of(realm)
     try:
         with httpx.Client(
                 headers={"User-Agent": WEB_UA},
                 timeout=httpx.Timeout(HTTP_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT,
                                       pool=HTTP_CONNECT_TIMEOUT)) as c:
-            r = c.get(f"{HOST}/v2/plugin/auth/token", params={"state": state},
+            r = c.get(f"{host}/v2/plugin/auth/token", params={"state": state},
                       headers={"Accept": "application/json, text/plain, */*",
                                "X-No-Authorization": "true"})
             obj = _upstream_json(r)
@@ -1184,20 +1229,23 @@ def fetch_credential_by_state(state: str) -> dict | None:
     return data
 
 
-def build_credential_from_token(token: dict) -> tuple[str, dict]:
+def build_credential_from_token(token: dict, realm: str = "cn") -> tuple[str, dict]:
     """由 token 换取账号信息并组装 .info 凭证。
 
     返回 `(credential_json, meta)`；自检不过则抛 `WbLoginError`。
+
+    `realm` 决定取账号信息的上游域（官方接力流可 global；默认 cn 零回归）。
     """
     # 用同一个「零 cookie」思路取账号信息：只需要 Bearer 令牌
-    domain = token.get("domain") or urllib.parse.urlparse(HOST).netloc
+    host = _host_of(realm)
+    domain = token.get("domain") or urllib.parse.urlparse(host).netloc
     account: dict = {}
     try:
         with httpx.Client(headers={"User-Agent": WEB_UA},
                           timeout=httpx.Timeout(HTTP_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT,
                                                 pool=HTTP_CONNECT_TIMEOUT)) as c:
             r = c.get(
-                f"{HOST}/v2/plugin/accounts",
+                f"{host}/v2/plugin/accounts",
                 headers={"Accept": "application/json, text/plain, */*",
                          "Authorization": "Bearer " + str(token["accessToken"]),
                          "X-Domain": domain,
@@ -1218,17 +1266,21 @@ def build_credential_from_token(token: dict) -> tuple[str, dict]:
     return built, check.meta
 
 
-def start_official_login() -> PhoneLoginSession:
+def start_official_login(realm: str = "cn") -> PhoneLoginSession:
     """只做第 1 步：拿 state + authUrl（供「官方页面接力」用）。
 
     比 `start_login()` 轻得多 —— 不铺 Keycloak/OneID 授权链，
     因为那条链是给「服务端代跑短信登录」用的；官方接力模式下
     用户自己会把这条链走完。
+
+    `realm` 支持 'cn' | 'global'（镜像 Go login --realm）：
+    global 走 www.workbuddy.ai，Origin/Referer 同域。
     """
-    sess = _new_session()
+    host = _host_of(realm)
+    sess = _new_session(realm)
     try:
         r = sess.client.post(
-            f"{HOST}/v2/plugin/auth/state?platform=workbuddy", json={},
+            f"{host}/v2/plugin/auth/state?platform=workbuddy", json={},
             headers=sess._headers({"Content-Type": "application/json",
                                    "X-Requested-With": "XMLHttpRequest"}))
         data = _envelope_data(_upstream_json(r), "auth_state")
