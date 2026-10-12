@@ -275,13 +275,11 @@ class AccountSession:
         return data
 
     def fetch_models(self) -> list:
-        """模型目录：realm 基址 + CN 现状路径（/v2/enterprises/{eid}/models）。
-
-        该路径形状两域同构（Go global 实测 /v2/enterprises/personal/models 200），
-        区别只在基址——CN=copilot.tencent.com，Global=workbuddy.ai。
-        """
+        """模型目录：realm 基址 + realm_mod.models_path（CN=/console/...、Global=/v2/...，
+        方向与 chat 相反，照 Go modelsPath）。"""
         eid = self.cm._enterprise_path_key()
-        data = self._chat_get_json(f"/v2/enterprises/{eid}/models")
+        path = realm_mod.models_path(self._realm).replace("personal", eid, 1)
+        data = self._chat_get_json(path)
         payload = data.get("data", {})
         models = payload.get("models")
         if isinstance(models, list) and models:

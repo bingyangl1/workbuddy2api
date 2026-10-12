@@ -251,7 +251,7 @@ class EndpointDispatchTests(unittest.TestCase):
         self.assertIn("未就绪", r.get("msg", ""))
 
     def test_models_path_cn_enterprise_style(self):
-        """CN fetch_models 路径与改造前一致：/v2/enterprises/{eid}/models。"""
+        """CN fetch_models 路径照 Go modelsPath（REVERSED）：/console/enterprises/{eid}/models。"""
         urls = []
 
         class FakeClient:
@@ -274,7 +274,7 @@ class EndpointDispatchTests(unittest.TestCase):
             models = sess.fetch_models()
         self.assertEqual(models, [{"id": "hy3"}])
         self.assertTrue(urls[0].startswith(
-            "https://copilot.tencent.com/v2/enterprises/personal/models"), urls)
+            "https://copilot.tencent.com/console/enterprises/personal/models"), urls)
 
     def test_models_path_global_workbuddy_base(self):
         urls = []
