@@ -243,13 +243,22 @@ def _get_turing_device_token() -> str | None:
 
 
 class CredentialManager:
-    """从 auth 文件读取凭据；token 临近过期时自动刷新并回写。"""
+    """从 auth 文件读取凭据；token 临近过期时自动刷新并回写。
+
+    realm 双域支持（P1 L90）：账号 realm 由 auth 里的 realm/domain 判定
+    （admin.realm.realm_of，含逃生门）。出站 base / 路径 / UA 品牌段随 realm：
+      * CN     chat = copilot.tencent.com（/v2 前缀路径），UA 品牌 WorkBuddy
+      * Global chat = www.workbuddy.ai（/console 优先、404/405 回落 /v2），
+              UA 品牌 WorkBuddy AI，models 路径 /v2/enterprises/...（与 CN 相反）
+    模块级常量 BACKEND 仅作存量兜底；本类一律按实例 realm 取 base。
+    """
 
     def __init__(self, path: Path):
         self.path = path
         self._lock = threading.Lock()
         self._cached: dict | None = None
         self._mtime: float = 0.0
+        self._realm: str = "cn"
 
     def _read_raw(self) -> dict:
         with open(self.path, "r", encoding="utf-8") as f:
@@ -264,12 +273,51 @@ class CredentialManager:
         if self._cached is None or mt != self._mtime:
             self._cached = self._read_raw()
             self._mtime = mt
+            # realm 随凭证重判（域可能被外部改成 global）
+            try:
+                from admin import realm as realm_mod
+                self._realm = realm_mod.realm_of(self._cached.get("auth") or {})
+            except Exception:  # noqa: BLE001  standalone 缺 admin 时按 cn
+                self._realm = "cn"
 
     def _session(self) -> dict:
         self._load_if_stale()
         if self._cached is None:
             raise RuntimeError(f"无法读取 auth 文件：{self.path}")
         return self._cached
+
+    @property
+    def realm(self) -> str:
+        """当前账号的 realm（'cn' | 'global'），懒加载缓存。"""
+        self._load_if_stale()
+        return self._realm
+
+    def _chat_base(self) -> str:
+        """本账号的出站 chat 基址（镜像 AccountSession._chat_base）。"""
+        try:
+            from admin import realm as realm_mod
+            return realm_mod.chat_base(self.realm)
+        except Exception:  # noqa: BLE001
+            return BACKEND
+
+    def _chat_paths(self) -> list[str]:
+        """chat 出站路径候选（CN=[/v2/...]，Global=[/console/... 回落 /v2/...]）。"""
+        try:
+            from admin import realm as realm_mod
+            return realm_mod.chat_paths(self.realm)
+        except Exception:  # noqa: BLE001
+            return ["/v2/chat/completions"]
+
+    def _models_path(self, eid: str) -> str:
+        """模型列表路径：CN=/console/enterprises/...，Global=/v2/enterprises/...
+        （方向与 chat 相反，照 Go modelsPath）。非 personal 时 eid 为数字 id。
+        """
+        try:
+            from admin import realm as realm_mod
+            base = realm_mod.models_path(self.realm)  # 形如 /console/enterprises/personal/models
+            return base.replace("personal", eid, 1)
+        except Exception:  # noqa: BLE001
+            return f"/v2/enterprises/{eid}/models"
 
     def _is_expired(self) -> bool:
         s = self._session()
@@ -284,7 +332,7 @@ class CredentialManager:
         headers = self._build_headers_from(auth, s.get("account") or {})
         headers["X-Refresh-Token"] = auth.get("refreshToken", "")
         headers["X-Auth-Refresh-Source"] = "plugin"
-        url = f"{BACKEND}/v2/plugin/auth/token/refresh"
+        url = f"{self._chat_base()}/v2/plugin/auth/token/refresh"
         try:
             with httpx.Client(timeout=15, limits=_HTTP_LIMITS) as c:
                 r = c.post(url, headers=headers, json={})
@@ -313,6 +361,13 @@ class CredentialManager:
 
     def _build_headers_from(self, auth: dict, account: dict) -> dict:
         domain = auth.get("domain") or DEFAULT_DOMAIN
+        # UA 品牌段随 realm：CN WorkBuddy / Global WorkBuddy AI（照 Go headers.go）
+        ua = client_user_agent()
+        try:
+            from admin import realm as realm_mod
+            ua = realm_mod.chat_ua(self.realm)
+        except Exception:  # noqa: BLE001
+            pass
         h = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -321,7 +376,7 @@ class CredentialManager:
             "X-Enterprise-Id": account.get("enterpriseId", ""),
             "X-Tenant-Id": account.get("enterpriseId", ""),
             "X-Domain": domain,
-            "User-Agent": client_user_agent(),
+            "User-Agent": ua,
         }
         # 风控设备头：与桌面端 Turing Shield 一致，缺失会被上游识别为异常客户端。
         # 取不到（桌面端未安装 / SDK 不支持）时优雅降级为不带该头，不影响主流程。
@@ -366,7 +421,7 @@ class CredentialManager:
     def _request_backend(self, method: str, path: str, json_body: dict | None = None) -> dict:
         """向后端发一个同步请求，返回 {code, msg, requestId, data} 或抛异常。"""
         headers = self.get_headers()
-        url = f"{BACKEND}{path}"
+        url = f"{self._chat_base()}{path}"
         try:
             with httpx.Client(timeout=15, limits=_HTTP_LIMITS) as c:
                 if method.upper() == "GET":
@@ -390,7 +445,7 @@ class CredentialManager:
         属于正常业务结果，需要由调用方根据 code 区分处理，而非当作错误抛掉。
         """
         headers = self.get_headers()
-        url = f"{BACKEND}{path}"
+        url = f"{self._chat_base()}{path}"
         try:
             with httpx.Client(timeout=15, limits=_HTTP_LIMITS) as c:
                 if method.upper() == "GET":
@@ -429,7 +484,7 @@ class CredentialManager:
           - 仅 data.agents[].models 为字符串数组时，回退收集并去重。
         """
         eid = self._enterprise_path_key()
-        data = self._request_backend("GET", f"/v2/enterprises/{eid}/models")
+        data = self._request_backend("GET", self._models_path(eid))
         payload = data.get("data", {})
         models = payload.get("models")
         if isinstance(models, list) and models:
@@ -461,7 +516,7 @@ class CredentialManager:
         能力层需要完整结构，故单独提供本方法。
         """
         eid = self._enterprise_path_key()
-        return self._request_backend("GET", f"/v2/enterprises/{eid}/models")
+        return self._request_backend("GET", self._models_path(eid))
 
     def generate_image(self, body: dict, timeout: float = 300.0) -> dict:
         """调后端生图接口 /v2/images/generations（同步返回）。
@@ -474,7 +529,7 @@ class CredentialManager:
                    "usage":{"output_image_counts":N,"credit":X}}}
         """
         headers = self.get_headers()
-        url = f"{BACKEND}/v2/images/generations"
+        url = f"{self._chat_base()}/v2/images/generations"
         try:
             with httpx.Client(timeout=timeout, limits=_HTTP_LIMITS) as c:
                 r = c.post(url, headers=headers, json=body)
@@ -932,26 +987,29 @@ async def chat_completions(request: Request,
 
     headers = cred.get_headers()
     headers.update(_client_ip_headers(request))
-    url = f"{BACKEND}/v2/chat/completions"
+    # realm 分派：CN=/v2 单路径；Global=/console 优先（404/405 回落 /v2，
+    # 镜像 Go ChatStream 路径循环）。Global 时 UA 已由 get_headers 切品牌段。
+    urls = _realm_chat_urls(cred)
+    url = urls[0]
     t0 = time.time()
 
     if client_wants_stream:
         return StreamingResponse(
-            _stream_upstream(url, headers, body, model_name, t0, rid),
+            _stream_upstream(url, headers, body, model_name, t0, rid,
+                             fallback_paths=urls[1:]),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     # 非流式：后端只支持流式，这里把后端 SSE 聚合成单个 chat.completion 响应
     try:
-        async with httpx.AsyncClient(timeout=_stream_timeout(), limits=_HTTP_LIMITS) as c:
-            async with c.stream("POST", url, headers=headers, json=body) as r:
-                if r.status_code != 200:
-                    raw = await r.aread()
-                    _log(f"[{rid}] ✗ HTTP {r.status_code} | {model_name} | {_truncate(raw.decode('utf-8','replace'),200)}")
-                    _log(f"[{rid}] ── ERROR BODY ──\n{raw.decode('utf-8','replace')}")
-                    raise HTTPException(status_code=r.status_code, detail=_safe_err_raw(raw, r.status_code))
-                collected = await _collect_stream(r)
+        status, raw = await _post_backend_once(url, headers, body,
+                                               fallback_urls=urls[1:])
+        if status != 200:
+            _log(f"[{rid}] ✗ HTTP {status} | {model_name} | {_truncate(raw.decode('utf-8','replace'),200)}")
+            _log(f"[{rid}] ── ERROR BODY ──\n{raw.decode('utf-8','replace')}")
+            raise HTTPException(status_code=status, detail=_safe_err_raw(raw, status))
+        collected = _collect_raw_sse(raw)
     except HTTPException:
         raise
     except httpx.HTTPError as e:
@@ -1089,6 +1147,91 @@ async def _collect_stream(response: httpx.Response) -> dict:
     }
 
 
+def _collect_raw_sse(raw: bytes) -> dict:
+    """从**已聚合的原始 SSE 字节**重建非流式 chat.completion 对象。
+
+    与 `_collect_stream` 同一套合并语义（content / reasoning_content /
+    tool_calls 分片 / usage / finish_reason），供「先聚合字节再解析」的
+    非流式路径复用（如 Anthropic 端点带路径回落的请求）。
+    """
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_calls: dict[int, dict] = {}
+    model: str | None = None
+    finish_reason: str | None = None
+    usage: dict | None = None
+    saw_content_delta = False
+
+    for line in raw.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        model = chunk.get("model") or model
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+        for choice in chunk.get("choices") or []:
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                content_parts.append(delta["content"])
+                saw_content_delta = True
+            if delta.get("reasoning_content"):
+                reasoning_parts.append(delta["reasoning_content"])
+            msg = choice.get("message") or {}
+            if not saw_content_delta and msg.get("content"):
+                content_parts.append(msg["content"])
+            if not reasoning_parts and msg.get("reasoning_content"):
+                reasoning_parts.append(msg["reasoning_content"])
+            for tc in delta.get("tool_calls") or []:
+                idx = tc.get("index", 0)
+                slot = tool_calls.setdefault(idx, {"id": None, "name": None, "arguments": ""})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["arguments"] += fn["arguments"]
+
+    tcs = None
+    if tool_calls:
+        tcs = [
+            {"id": v["id"], "type": "function",
+             "function": {"name": v["name"], "arguments": v["arguments"]}}
+            for _, v in sorted(tool_calls.items())
+        ]
+        finish_reason = finish_reason or "tool_calls"
+
+    message = {"role": "assistant", "content": "".join(content_parts) or None}
+    if tcs:
+        message["tool_calls"] = tcs
+        if finish_reason == "length":
+            dropped = upstream_compat.drop_truncated_tool_calls(message)
+            if dropped:
+                tcs = message.get("tool_calls")
+                _log(f"剔除 {dropped} 个参数截断的 tool_call（finish_reason=length）")
+    reasoning = "".join(reasoning_parts)
+    if reasoning:
+        message["reasoning_content"] = reasoning
+    return {
+        "id": "chatcmpl-" + os.urandom(12).hex(),
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model or "unknown",
+        "choices": [{"index": 0, "message": message,
+                     "finish_reason": finish_reason or "stop"}],
+        "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 def _safe_err_raw(raw: bytes, status: int) -> dict:
     try:
         return json.loads(raw.decode("utf-8", "replace"))
@@ -1096,13 +1239,49 @@ def _safe_err_raw(raw: bytes, status: int) -> dict:
         return {"error": {"message": raw.decode("utf-8", "replace")[:500], "type": "upstream_error", "code": status}}
 
 
+def _realm_chat_urls(cred) -> list[str]:
+    """按账号 realm 给出 chat 出站 URL 候选（CN 单路径，Global /console→/v2 回落）。
+
+    cred 需有 .realm / ._chat_base() / ._chat_paths()（CredentialManager 已实现；
+    兼容仅有属性的替身对象）。返回顺序即尝试顺序。
+    """
+    try:
+        realm = cred.realm
+    except Exception:  # noqa: BLE001
+        realm = "cn"
+    try:
+        base = cred._chat_base()
+    except Exception:  # noqa: BLE001
+        base = BACKEND
+    try:
+        paths = cred._chat_paths()
+    except Exception:  # noqa: BLE001
+        paths = ["/v2/chat/completions"]
+    if realm != "global":
+        paths = ["/v2/chat/completions"]
+    return [base + p for p in paths]
+
+
 async def _stream_upstream(url: str, headers: dict, body: dict,
-                           model_name: str = "?", t0: float = 0.0, rid: str = ""):
+                           model_name: str = "?", t0: float = 0.0, rid: str = "",
+                           fallback_paths=None):
     """把后端 SSE 原样转发给客户端（后端已是标准 OpenAI SSE，含 tool_calls）。
 
     同时轻量解析流，统计 finish_reason / tool_calls / usage 用于日志，不阻塞转发。
     完整原始 SSE 累积后落盘到日志（调试用）。
+
+    fallback_paths：Global chat 的候选**完整 URL**（如 [https://www.workbuddy.ai/v2/chat/completions]）；
+    首路径 404/405 时换下一个重开流（镜像 Go ChatStream 的 chatFallbackHTTPStatus）。
     """
+    if fallback_paths:
+        urls = [url] + [u if "://" in u else None for u in fallback_paths]
+        # 兼容传路径后缀的情况：拼到 origin 上
+        parsed = urllib.parse.urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        urls = [url] + [u if u and "://" in u else origin + u
+                        for u in fallback_paths]
+    else:
+        urls = [url]
     finish_reason = None
     tool_names: list[str] = []
     usage: dict = {}
@@ -1153,14 +1332,23 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
         # 既不报错也不归还资源。改成静默超时 —— 有数据就续期、静默到上限才判死，
         # 等价于参考实现 internal/upstream/idle.go 的空闲监控，且不设总时长。
         async with httpx.AsyncClient(timeout=_stream_timeout(), limits=_HTTP_LIMITS) as c:
-            async with c.stream("POST", url, headers=headers, json=body) as r:
-                if r.status_code != 200:
-                    err = await r.aread()
-                    _log(f"{prefix}✗ HTTP {r.status_code} | {model_name} | {_truncate(err.decode('utf-8','replace'),200)}")
+            r = None
+            for attempt, u in enumerate(urls):
+                r = await c.build_request("POST", u, headers=headers, json=body)
+                resp = await c.send(r, stream=True)
+                if resp.status_code in (404, 405) and attempt + 1 < len(urls):
+                    # Global chat /console 404/405 → 换 /v2 重开（Go chatFallbackHTTPStatus）
+                    _log(f"{prefix}↻ HTTP {resp.status_code} | {model_name} | "
+                         f"路径回落 {u} → {urls[attempt + 1]}")
+                    await resp.aclose()
+                    continue
+                if resp.status_code != 200:
+                    err = await resp.aread()
+                    _log(f"{prefix}✗ HTTP {resp.status_code} | {model_name} | {_truncate(err.decode('utf-8','replace'),200)}")
                     _log(f"{prefix}── ERROR BODY ──\n{err.decode('utf-8','replace')}")
-                    yield _err_event(err, r.status_code)
+                    yield _err_event(err, resp.status_code)
                     return
-                async for chunk in r.aiter_bytes():
+                async for chunk in resp.aiter_bytes():
                     if chunk:
                         raw_parts.append(chunk)
                         _feed(chunk)
@@ -1170,6 +1358,7 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
                 tail = normalizer.flush()
                 if tail:
                     yield tail
+                return
     except httpx.HTTPError as e:
         _log(f"{prefix}✗ 网络错误 | {model_name} | {e}")
         yield _err_event(str(e).encode(), 502)
@@ -1224,29 +1413,39 @@ def _chat_body_desensitize(body: dict, *, force_compact: bool = False) -> dict:
     )
 
 
-async def _post_backend_once(url: str, headers: dict, body: dict) -> tuple[int, bytes]:
+async def _post_backend_once(url: str, headers: dict, body: dict,
+                             fallback_urls=None) -> tuple[int, bytes]:
+    """POST 后端并聚合完整响应字节。fallback_urls：404/405 时依次重试的候选 URL
+    （Global chat /console → /v2 路径回落，镜像 Go ChatStream）。"""
     # 这也是在消费一个 SSE 流（只是聚合成一次性字节），所以用同一套超时：
     # connect 短、read 管静默、**不设总时长**。原来的 timeout=120 会把 connect
     # 也设成 120s，遇到连不上的节点就一直挂着不换号。
+    urls = [url] + [u for u in (fallback_urls or [])]
     async with httpx.AsyncClient(timeout=_stream_timeout(), limits=_HTTP_LIMITS) as c:
-        async with c.stream("POST", url, headers=headers, json=body) as r:
-            chunks: list[bytes] = []
-            async for chunk in r.aiter_bytes():
-                if chunk:
-                    chunks.append(chunk)
-            return r.status_code, b"".join(chunks)
+        for attempt, u in enumerate(urls):
+            async with c.stream("POST", u, headers=headers, json=body) as r:
+                if r.status_code in (404, 405) and attempt + 1 < len(urls):
+                    _log(f"↻ HTTP {r.status_code} 路径回落 {u} → {urls[attempt + 1]}")
+                    await r.aclose()
+                    continue
+                chunks: list[bytes] = []
+                async for chunk in r.aiter_bytes():
+                    if chunk:
+                        chunks.append(chunk)
+                return r.status_code, b"".join(chunks)
 
 
 async def _post_backend_with_filter_retry(url: str, headers: dict, body: dict,
-                                          rid: str = "", model_name: str = "?") -> tuple[int, bytes, dict]:
+                                          rid: str = "", model_name: str = "?",
+                                          fallback_urls=None) -> tuple[int, bytes, dict]:
     prefix = f"[{rid}] " if rid else ""
-    status, raw = await _post_backend_once(url, headers, body)
+    status, raw = await _post_backend_once(url, headers, body, fallback_urls)
     text = raw.decode("utf-8", "replace")
     if status == 200 and _looks_like_content_filter_text(text) and CONFIG.get("desensitize") and CONFIG.get("no_compact"):
         retry_body = _chat_body_desensitize(body, force_compact=True)
         _log(f"{prefix}↻ RESPONSES {model_name} | content filter detected, retry with compact harness")
         _log(f"{prefix}── RESPONSES RETRY CHAT BODY ──\n{json.dumps(retry_body, ensure_ascii=False, indent=2)}")
-        retry_status, retry_raw = await _post_backend_once(url, headers, retry_body)
+        retry_status, retry_raw = await _post_backend_once(url, headers, retry_body, fallback_urls)
         retry_text = retry_raw.decode("utf-8", "replace")
         if retry_status == 200 and not _looks_like_content_filter_text(retry_text):
             return retry_status, retry_raw, retry_body
@@ -1312,7 +1511,8 @@ async def create_response(request: Request,
 
     headers = cred.get_headers()
     headers.update(_client_ip_headers(request))
-    url = f"{BACKEND}/v2/chat/completions"
+    urls = _realm_chat_urls(cred)
+    url = urls[0]
     t0 = time.time()
 
     if client_wants_stream:
@@ -1324,7 +1524,8 @@ async def create_response(request: Request,
 
     # 非流式：聚合后端 SSE → 非流式 Response 对象
     try:
-        status_code, raw, final_body = await _post_backend_with_filter_retry(url, headers, chat_body, rid, model_name)
+        status_code, raw, final_body = await _post_backend_with_filter_retry(
+            url, headers, chat_body, rid, model_name, fallback_urls=urls[1:])
         if status_code != 200:
             _log(f"[{rid}] ✗ HTTP {status_code} | {model_name} | {_truncate(raw.decode('utf-8','replace'),200)}")
             raise HTTPException(status_code=status_code, detail=_safe_err_raw(raw, status_code))
@@ -1444,7 +1645,8 @@ async def create_message(request: Request,
 
     headers = cred.get_headers()
     headers.update(_client_ip_headers(request))
-    url = f"{BACKEND}/v2/chat/completions"
+    urls = _realm_chat_urls(cred)
+    url = urls[0]
     t0 = time.time()
 
     if client_wants_stream:
@@ -1456,15 +1658,14 @@ async def create_message(request: Request,
 
     # 非流式：聚合后端 SSE → 组装单个 Anthropic Message 对象
     try:
-        async with httpx.AsyncClient(timeout=_stream_timeout(), limits=_HTTP_LIMITS) as c:
-            async with c.stream("POST", url, headers=headers, json=chat_body) as r:
-                if r.status_code != 200:
-                    raw = await r.aread()
-                    _log(f"[{rid}] ✗ ANTHROPIC HTTP {r.status_code} | {model_name} | "
-                         f"{_truncate(raw.decode('utf-8','replace'), 200)}")
-                    raise HTTPException(status_code=r.status_code,
-                                        detail=_safe_err_raw(raw, r.status_code))
-                agg = await _collect_stream(r)
+        status, raw = await _post_backend_once(url, headers, chat_body,
+                                               fallback_urls=urls[1:])
+        if status != 200:
+            _log(f"[{rid}] ✗ ANTHROPIC HTTP {status} | {model_name} | "
+                 f"{_truncate(raw.decode('utf-8','replace'), 200)}")
+            raise HTTPException(status_code=status,
+                                detail=_safe_err_raw(raw, status))
+        agg = _collect_raw_sse(raw)
     except HTTPException:
         raise
     except httpx.HTTPError as e:
