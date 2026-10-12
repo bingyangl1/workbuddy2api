@@ -4,8 +4,8 @@
 语义严格镜像 Go 上游 Sliverkiss/workbuddy2api（MIT）：
 
   - 判定顺序：global_enabled=False → 恒 cn（逃生门）；
-    否则 realm == "global" 或 domain 是 workbuddy.ai / *.workbuddy.ai → global；
-    其余（含 domain 为空/未知）→ cn
+    否则 realm == "global" 或 domain 是 workbuddy.ai / codebuddy.ai 及其子域
+    → global；其余（含 domain 为空/未知）→ cn
   - 端点差异（Go internal/upstream/client.go）：
 
     | 维度        | CN                        | Global                    |
@@ -119,9 +119,20 @@ def global_enabled() -> bool:
 
 
 def has_global_domain(domain: str | None) -> bool:
-    """域名是否属于国际版：workbuddy.ai 本身或其任意子域（镜像 Go isGlobalDomain）。"""
+    """域名是否属于国际版：workbuddy.ai / codebuddy.ai 本身或其任意子域。
+
+    镜像 Go isGlobalDomain（workbuddy.ai 家族），并在此基础上扩展 codebuddy.ai
+    家族——本机真实凭证实测（2027-02）：
+      * 国际版 IDE 插件凭证 domain=www.codebuddy.ai，JWT iss
+        https://www.codebuddy.ai/auth/realms/copilot；
+      * 同一 token 走 workbuddy.ai 200 可用、走 copilot.tencent.com 401 废号。
+    即 codebuddy.ai 是国际版 Keycloak 域的另一个前端域，按 cn 路由必废号。
+    CN 域（codebuddy.cn / workbuddy.cn / copilot.tencent.com）与这两个后缀
+    均无交集，扩展不引入误判面。
+    """
     d = (domain or "").strip().lower()
-    return d == "workbuddy.ai" or d.endswith(".workbuddy.ai")
+    return (d == "workbuddy.ai" or d.endswith(".workbuddy.ai")
+            or d == "codebuddy.ai" or d.endswith(".codebuddy.ai"))
 
 
 def resolve_realm(explicit: str | None, domain: str | None) -> Realm:

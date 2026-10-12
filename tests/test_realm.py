@@ -194,18 +194,37 @@ class RealmDomainTests(unittest.TestCase):
             self.assertEqual(realm.realm_of({"domain": "www.workbuddy.ai"}),
                              "global")
 
-    # -- isGlobalDomain 边界（Go isGlobalDomain：小写化 + 去空白 + 后缀匹配）--
+    # -- isGlobalDomain 边界（Go isGlobalDomain：小写化 + 去空白 + 后缀匹配；
+    #    本实现扩展 codebuddy.ai 家族——国际版 IDE 插件凭证实测 domain=www.codebuddy.ai）--
     def test_has_global_domain_table(self):
         """大小写不敏感、去空白；后缀必须落在域边界上。"""
         yes = ("workbuddy.ai", "www.workbuddy.ai", "sub.workbuddy.ai",
-               "WWW.WORKBUDDY.AI", "  workbuddy.ai  ", " x.workbuddy.ai ")
+               "WWW.WORKBUDDY.AI", "  workbuddy.ai  ", " x.workbuddy.ai ",
+               # codebuddy.ai 家族（本机真实凭证实测，P1 判定缺口修正）
+               "codebuddy.ai", "www.codebuddy.ai", "login.codebuddy.ai",
+               "auth.codebuddy.ai", "www.codebuddy.ai ",
+               )
         no = ("", "  ", "www.codebuddy.cn", "workbuddy.ai.evil.com",
               "notworkbuddy.ai", "myworkbuddy.ai",
-              "x.workbuddy.ai.evil.com", "workbuddy.ai\x00")
+              "x.workbuddy.ai.evil.com", "workbuddy.ai\x00",
+              # 防误判面：CN 域不得被 codebuddy.ai 后缀命中
+              "www.codebuddy.cn", "codebuddy.cn", "sub.codebuddy.cn",
+              "codebuddy.ai.evil.com", "notcodebuddy.ai",
+              "x.codebuddy.ai.evil.com", "codebuddy.ai\x00")
         for d in yes:
             self.assertTrue(realm.has_global_domain(d), repr(d))
         for d in no:
             self.assertFalse(realm.has_global_domain(d), repr(d))
+
+    def test_codebuddy_ai_domain_is_global(self):
+        """国际版 IDE 插件凭证（domain=www.codebuddy.ai）必须按 global 路由。
+
+        真实对照（2027-02 冒烟）：同一 token 走 copilot.tencent.com 401、
+        走 www.workbuddy.ai 200。原生判定若给 cn，账号必废。
+        """
+        self.assertEqual(realm.resolve_realm("", "www.codebuddy.ai"), "global")
+        self.assertEqual(realm.realm_of({"domain": "www.codebuddy.ai"}), "global")
+        self.assertEqual(realm.realm_of({"domain": "codebuddy.ai"}), "global")
 
     # -- 纯推导（Go TestResolveRealm：不受逃生门影响）--
     def test_resolve_realm_pure_function(self):
