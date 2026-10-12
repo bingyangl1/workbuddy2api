@@ -23,6 +23,9 @@ class Account(Base):
     uid = Column(String(120), default="")
     enterprise_id = Column(String(120), default="")
     domain = Column(String(120), default="")
+    # 账号域（'cn' / 'global'，见 admin/realm.py）：决定端点分派、UA 品牌、
+    # 任务域门控与模型前缀路由。存量账号在 init_db 迁移时按 domain 回填。
+    realm = Column(String(8), nullable=False, default="cn")
     auth_json = Column(Text, nullable=False)  # 原始 .info 内容（含 token）
     status = Column(String(16), default="active")  # active | disabled
     balance_total = Column(Integer, default=0)

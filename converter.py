@@ -126,7 +126,11 @@ from anthropic_adapter import (
 # 常量
 # ---------------------------------------------------------------------------
 
-BACKEND = "https://copilot.tencent.com"
+#: CN chat 基址。realm 化后唯一事实来源在 admin/realm.py（CN_CHAT_BASE）；
+#: 这里保留模块级常量供「本机桌面登录态直连」（standalone converter）使用——
+#: 该进程只读本机 .info（其域可 cn 可 global），多 realm 分派在完整改造
+#: （P1 后续任务：CredentialManager realm 化）中落地。
+from admin.realm import CN_CHAT_BASE as BACKEND  # noqa: E402
 DEFAULT_DOMAIN = "www.codebuddy.cn"
 #: 出站 User-Agent：**必须**伪装成官方客户端。
 #: 原来这里是 `codebuddy2openai/2.0` —— 一个自报家门的网关标识，上游「使用端」

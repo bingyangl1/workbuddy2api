@@ -1,4 +1,5 @@
 """SQLAlchemy 引擎 / 会话 / Base，并负责建库建表。"""
+import json
 import logging
 import re
 import time
@@ -116,6 +117,11 @@ def init_db() -> bool:
 
         # 迁移：给 api_keys 表加 key_full 列（若不存在）
         _ensure_column("api_keys", "key_full", "VARCHAR(2048)", "DEFAULT ''")
+
+        # 迁移：accounts 加 realm 列（Phase 1 双域；见 admin/realm.py）。
+        # 存量账号按 auth_json 里的 auth.domain 回填（workbuddy.ai→global，其余→cn）
+        _ensure_column("accounts", "realm", "VARCHAR(8)", "NOT NULL DEFAULT 'cn'")
+        _backfill_account_realm()
 
         # 迁移：给 model_configs 表补齐倍率相关列（旧实例可能缺）
         _ensure_column("model_configs", "credit_multiplier", "FLOAT", "DEFAULT 0")
@@ -269,3 +275,47 @@ def _ensure_index(table: str, index: str, columns: tuple[str, ...]) -> bool:
         # 权限不足 / 方言不支持 / 并发建索引冲突：都不该让服务启动失败
         logger.warning("创建索引 %s 失败（不影响启动）：%s", index, e)
         return False
+
+
+def _backfill_account_realm() -> None:
+    """存量账号回填 realm（幂等）。
+
+    按 auth_json 的 auth.domain 判定（workbuddy.ai → global，其余 → cn），
+    用 resolve_realm 的纯推导（不受逃生门影响——否则开了逃生门会把
+    国际版账号永久写成 cn，Go 上游注释里专门警告过这点）。
+
+    只处理 realm 为空/'cn' 默认值的存量行里 domain 实际是 workbuddy.ai 的；
+    既有显式 'global' 值不动（用户/同步流程写过的为准）。
+    """
+    try:
+        from admin.realm import GLOBAL, resolve_realm
+
+        with SessionLocal() as db:
+            from admin.models import Account
+
+            rows = db.query(Account).filter(
+                Account.realm.in_(["cn", ""])
+            ).all()
+            changed = 0
+            for a in rows:
+                try:
+                    auth = json.loads(a.auth_json or "{}")
+                    if not isinstance(auth, dict):
+                        continue
+                    inner = auth.get("auth")
+                    if not isinstance(inner, dict):
+                        inner = auth  # 扁平形（少见）按顶层兜底
+                    explicit = inner.get("realm")
+                    domain = inner.get("domain") or a.domain
+                    r = resolve_realm(explicit, domain)
+                    if r == GLOBAL and (a.realm or "cn") != GLOBAL:
+                        a.realm = GLOBAL
+                        changed += 1
+                except Exception:  # noqa: BLE001
+                    continue
+            if changed:
+                db.commit()
+                logger.info("已按 domain 回填 %d 个国际版账号的 realm", changed)
+    except Exception as e:  # noqa: BLE001
+        # 迁移失败不阻断启动：列默认值 'cn' 保证行为与升级前一致
+        logger.warning("realm 回填失败（不影响启动，下次启动重试）：%s", e)
