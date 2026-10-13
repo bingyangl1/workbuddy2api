@@ -39,6 +39,7 @@ def _make_session_factory():
         Base.metadata.tables["api_keys"],
         Base.metadata.tables["api_key_ips"],
         Base.metadata.tables["model_groups"],
+        Base.metadata.tables["account_groups"],  # T8：keys CRUD 会查
     ])
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 

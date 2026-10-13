@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from admin.audit import current_actor, log_request
 from admin.db import get_db
-from admin.models import ApiKey, ApiKeyIp, ModelGroup
+from admin.models import AccountGroup, ApiKey, ApiKeyIp, ModelGroup
 from admin.security import hash_key, key_ip_allowlist, require_admin, _norm_cidrs
 
 router = APIRouter(prefix="/api/keys", tags=["keys"])
@@ -25,6 +25,7 @@ class KeyIn(BaseModel):
     unlimited: bool = False
     note: str = ""
     group_id: int = 0  # 0 = 不绑定分组（可用全部启用模型）
+    account_group_id: int = 0  # P2 T8：0 = 不绑定账号池分组（全池选号）
     # ---- P2 T3：全维度 ----
     realm: str = ""                     # '' / cn / global（P1 列已存在，本次补 API）
     expires_at: str | None = None       # ISO 字符串；None/'' = 永不过期
@@ -66,6 +67,15 @@ def _encode_key(raw: str) -> str:
     return base64.b64encode(raw.encode()).decode()
 
 
+def _validate_account_group(db: Session, gid: int) -> int:
+    """账号池分组 id 校验：0 直接放行（未绑定）；>0 必须存在（防手滑绑到
+    已删分组 → 选号永远空池，还查不出原因）。"""
+    gid = int(gid or 0)
+    if gid and not db.query(AccountGroup).filter(AccountGroup.id == gid).first():
+        raise HTTPException(status_code=400, detail=f"账号池分组 #{gid} 不存在")
+    return gid
+
+
 def _decode_key(encoded: str) -> str:
     try:
         return base64.b64decode(encoded.encode()).decode()
@@ -77,6 +87,7 @@ def _decode_key(encoded: str) -> str:
 def list_keys(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
     rows = db.query(ApiKey).order_by(ApiKey.id.desc()).all()
     group_names = {g.id: g.name for g in db.query(ModelGroup).all()}
+    acc_group_names = {g.id: g.name for g in db.query(AccountGroup).all()}
     items = [
         {
             "id": k.id,
@@ -90,6 +101,8 @@ def list_keys(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
             "note": k.note,
             "group_id": int(k.group_id or 0),
             "group_name": group_names.get(int(k.group_id or 0), ""),
+            "account_group_id": int(getattr(k, "account_group_id", 0) or 0),
+            "account_group_name": acc_group_names.get(int(getattr(k, "account_group_id", 0) or 0), ""),
             # ---- P2 T3 ----
             "realm": (k.realm or ""),
             "expires_at": k.expires_at.isoformat() if k.expires_at else None,
@@ -120,6 +133,7 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
                request: Request = None):
     raw = _gen_key()
     gid = _validate_group(db, body.group_id)
+    agid = _validate_account_group(db, body.account_group_id)
     k = ApiKey(
         name=body.name or "未命名",
         key_hash=hash_key(raw),
@@ -129,6 +143,7 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
         unlimited=1 if body.unlimited else 0,
         note=body.note,
         group_id=gid,
+        account_group_id=agid,
         realm=_validate_realm(body.realm),
         expires_at=_parse_expires(body.expires_at),
         max_ips=int(body.max_ips or 0),
@@ -152,6 +167,7 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
         "credit_limit": k.credit_limit,
         "unlimited": bool(k.unlimited),
         "group_id": int(k.group_id or 0),
+        "account_group_id": int(k.account_group_id or 0),
         "realm": k.realm,
         "expires_at": k.expires_at.isoformat() if k.expires_at else None,
         "max_ips": int(k.max_ips or 0),
@@ -221,6 +237,8 @@ def patch_key(key_id: int, body: dict, _: bool = Depends(require_admin), db: Ses
         k.note = body["note"]
     if "group_id" in body:
         k.group_id = _validate_group(db, body["group_id"])
+    if "account_group_id" in body:
+        k.account_group_id = _validate_account_group(db, body["account_group_id"])
     # ---- P2 T3：全维度（显式传 null/'' 是**允许**的——改回「不限」；
     #      所以不能用真值判断，必须按「键在不在 body 里」区分）----
     if "realm" in body:

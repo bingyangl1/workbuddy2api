@@ -69,8 +69,28 @@ class Account(Base):
     credits_snapshot = Column(Text, default="")
     #: 快照采集时间，用于展示「N 分钟前更新」并判断数据是否可信。
     credits_synced_at = Column(DateTime, nullable=True)
+    # P2 T8：账号所属分组（0 = 未分组，归默认池；与 ApiKey.account_group_id
+    # 配对实现「密钥只碰某组账号」的池级隔离）
+    group_id = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AccountGroup(Base):
+    """账号池分组（Phase 2 T8）。
+
+    用途：把账号划进命名分组，密钥经 account_group_id 绑定后**只**从该组
+    选号——与模型分组（ModelGroup，管「能用哪些模型」）正交，这张管
+    「能用哪些账号」。删除守卫：组内还有账号、或还有密钥绑定时拒绝删除
+    （409），删除那一刻没人用不代表下一秒没有——并发请求刚选好号正要绑。
+    """
+
+    __tablename__ = "account_groups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False, unique=True)
+    note = Column(String(255), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class AccountModelCooldown(Base):
@@ -118,6 +138,10 @@ class ApiKey(Base):
     note = Column(String(255), default="")
     # 绑定的模型分组 id；0 = 未绑定（可用全部启用模型）。分组被删时按 0 处理（自动降级）
     group_id = Column(Integer, default=0)
+    # P2 T8：绑定的**账号池**分组 id；0 = 未绑定（从全池选号）。
+    # 与上面的 group_id（模型分组）正交：那个管「能用哪些模型」，
+    # 这个管「能用哪些账号」。命名刻意带 account_ 前缀避免混淆。
+    account_group_id = Column(Integer, nullable=False, default=0)
     # realm 限定：''=不限（存量默认） / 'cn' / 'global'。跨 realm 调用 403
     realm = Column(String(8), nullable=False, default="")
     # ---- P2 T3：密钥全维度 ----

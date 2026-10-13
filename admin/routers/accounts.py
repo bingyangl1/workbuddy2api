@@ -465,6 +465,7 @@ def list_accounts(_: bool = Depends(require_admin), db: Session = Depends(get_db
             "enterprise_id": a.enterprise_id,
             "domain": a.domain,
             "realm": a.realm or "cn",
+            "group_id": int(getattr(a, "group_id", 0) or 0),  # P2 T8
             "status": a.status,
             "balance_total": a.balance_total,
             "balance_remain": a.balance_remain,

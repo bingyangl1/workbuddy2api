@@ -1660,7 +1660,7 @@ _CREDIT_RE = re.compile(r"x\s*([0-9]+(?:\.[0-9]+)?)")
 
 def _transient_cool_fallback(db: Session, exclude_ids: set | None,
                              min_balance: int, now: datetime,
-                             limit: int = 5) -> list:
+                             limit: int = 5, group_id: int = 0) -> list:
     """整池都在临时冷却时的兜底候选（冷却最早到期的前 `limit` 个）。
 
     只在 `_select_account` 的严格过滤结果为空时调用。语义是「退一档，
@@ -1679,6 +1679,9 @@ def _transient_cool_fallback(db: Session, exclude_ids: set | None,
     q = (db.query(Account)
            .filter(Account.status == "active",
                    Account.cool_kind.in_(tuple(_TRANSIENT_COOL_KINDS))))
+    if group_id:
+        # T8：兜底同样不许跨组（否则「组内全冷却」会从别的组借号，隔离失效）
+        q = q.filter(Account.group_id == group_id)
     if min_balance > 0:
         q = q.filter(Account.balance_remain > 0)
     if exclude_ids:
@@ -1757,7 +1760,7 @@ def _looks_login_dead(acc: Account, now: datetime) -> bool:
 def _select_account(db: Session, exclude_ids: set | None = None,
                     min_balance: int = 1, mark_picked: bool = True,
                     model: str = "", sticky_key: str = "",
-                    require_realm: str = "") -> Account | None:
+                    require_realm: str = "", group_id: int = 0) -> Account | None:
     """从健康账号池中挑选一个账号。
 
     选号 = 会话粘性（命中即定）→ 健康过滤 → **到期紧迫度（硬优先）** →
@@ -1765,6 +1768,9 @@ def _select_account(db: Session, exclude_ids: set | None = None,
 
     健康条件：active、有余额、不在**任一**冷却/熔断/降权期内、不在 exclude_ids 中、
     该账号对该 model 没有处于模型级冷却（6004/11102）、在途未占满。
+
+    group_id（P2 T8）：>0 时只在**该账号分组**内选号（密钥绑定账号池分组的
+    隔离语义）。0 = 全池（现状）。跨组借号绝不发生——包括临时冷却兜底。
 
     **到期紧迫度是第一优先级（所有策略共用）**：
       0) 有 7 天内到期的剩余额度   —— 必须先用完，否则整包作废
@@ -1797,6 +1803,10 @@ def _select_account(db: Session, exclude_ids: set | None = None,
             free_model = True
             min_balance = 0
     q = db.query(Account).filter(Account.status == "active")
+    if group_id:
+        # T8：密钥绑定账号池分组 → 只在组内选号（隔离的核心一刀切在最前面，
+        # 后续所有过滤/兜底/粘性都只在组内候选上发生）
+        q = q.filter(Account.group_id == group_id)
     if min_balance > 0:
         q = q.filter(Account.balance_remain > 0)
     if exclude_ids:
@@ -1815,7 +1825,8 @@ def _select_account(db: Session, exclude_ids: set | None = None,
         # 而是退一档：把冷却最早到期、且阻塞原因只是临时限流的号拿来做候选。
         # 14003 这类「请求过于频繁」很可能已经自然恢复；即便没恢复，
         # 试一次也远好于给用户一个必然失败的 503。
-        rows = _transient_cool_fallback(db, exclude_ids, min_balance, now)
+        rows = _transient_cool_fallback(db, exclude_ids, min_balance, now,
+                                        group_id=group_id)
         if rows:
             _logger.warning(
                 "号池全部处于临时冷却中，启用兜底候选 %d 个（最早的 %s 到期）",
@@ -1970,6 +1981,13 @@ def _key_group_models(db: Session, key: "ApiKey | None") -> set[str] | None:
         return None
     from admin.routers.groups import effective_group_models
     return effective_group_models(db, gid)
+
+
+def _key_account_group(key: "ApiKey | None") -> int:
+    """密钥绑定的账号池分组 id；0 = 未绑定（全池选号，现状）。"""
+    if key is None:
+        return 0
+    return int(getattr(key, "account_group_id", 0) or 0)
 
 
 def _model_out_of_group_error(model: str) -> JSONResponse:
@@ -2443,7 +2461,8 @@ async def chat_completions(
                             break
                         acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
                                                 model=m, sticky_key=sticky_key,
-                                                require_realm=require_realm)
+                                                require_realm=require_realm,
+                                                group_id=_key_account_group(key))
                         if not acc_i:
                             if require_realm and not tried_ids:
                                 # 首个候选模型就选不出该 realm 的号 → 原因如实带出
@@ -2941,7 +2960,8 @@ async def responses_proxy(
                         break
                     acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
                                             model=m, sticky_key=sticky_key,
-                                            require_realm=require_realm)
+                                            require_realm=require_realm,
+                                            group_id=_key_account_group(key))
                     if not acc_i:
                         if require_realm and not tried_ids:
                             last_err_kind = "no_account"
@@ -3099,7 +3119,8 @@ async def responses_proxy(
                             break
                         acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
                                                 model=m, sticky_key=sticky_key,
-                                                require_realm=require_realm)
+                                                require_realm=require_realm,
+                                                group_id=_key_account_group(key))
                         if not acc_i:
                             if require_realm and not tried_ids:
                                 last_err_kind = "no_account"
@@ -3437,7 +3458,8 @@ async def anthropic_messages(
                         break
                     acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
                                             model=m, sticky_key=sticky_key,
-                                            require_realm=require_realm)
+                                            require_realm=require_realm,
+                                            group_id=_key_account_group(key))
                     if not acc_i:
                         if require_realm and not tried_ids:
                             last_err_kind = "no_account"
@@ -3598,7 +3620,8 @@ async def anthropic_messages(
                             break
                         acc_i = _select_account(db2, exclude_ids=tried_ids, min_balance=1,
                                                 model=m, sticky_key=sticky_key,
-                                                require_realm=require_realm)
+                                                require_realm=require_realm,
+                                                group_id=_key_account_group(key))
                         if not acc_i:
                             if require_realm and not tried_ids:
                                 last_err_kind = "no_account"

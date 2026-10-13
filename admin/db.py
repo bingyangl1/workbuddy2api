@@ -188,6 +188,10 @@ def init_db() -> bool:
         # 迁移（P2 T6）：usage_logs 记原始请求模型名（别名映射对账）
         _ensure_column("usage_logs", "requested_model", "VARCHAR(120)", "DEFAULT ''")
 
+        # 迁移（P2 T8）：账号池分组
+        _ensure_column("accounts", "group_id", "INT", "DEFAULT 0")
+        _ensure_column("api_keys", "account_group_id", "INT", "DEFAULT 0")
+
         # 迁移（P2 铺轨）：新表 audit_logs / api_tokens 由 create_all 建，
         # 但老库升级路径上索引同样需要显式兜底（见 _ensure_index 的说明：
         # create_all 对已存在的表不做任何事）。
