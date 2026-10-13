@@ -13,7 +13,8 @@ from admin.db import SessionLocal, init_db, wait_database_ready
 from admin.models import SystemSetting
 from admin.routers import (accounts, app_source, audit, client_profile, credits,
                            groups, growth, keys, login as login_router, logs,
-                           models, proxy, schedules, stats, sync, tokens)
+                           models, proxy, schedules, security as security_router,
+                           stats, sync, tokens)
 from admin.ratelimit import (clear_failures, get_client_ip, get_trusted_client_ip,
                              is_locked, record_failure)
 from admin.security import (
@@ -121,6 +122,7 @@ app.include_router(login_router.router)
 app.include_router(releases.router)
 app.include_router(audit.router)      # P2 T2：操作审计
 app.include_router(tokens.router)     # P2 T7：管理面只读 API Token
+app.include_router(security_router.router)  # P2 T5：入站 IP 管控
 # 自助上传页（无需后台登录态）：复刻 WorkBuddy 手机号登录页，
 # 让「发给朋友」这一诉求成立 —— 对方不需要知道后台口令。
 app.include_router(login_router.public_router)

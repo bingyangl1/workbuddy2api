@@ -37,6 +37,10 @@ def _factory():
         Base.metadata.tables["model_groups"],
         Base.metadata.tables["model_group_items"],
         Base.metadata.tables["model_configs"],  # effective_group_models 会查
+        # T5：/v1/usage 链上的全局 IP 闸会读这两张（fail-open 保底，但表要在）
+        Base.metadata.tables["system_settings"],
+        Base.metadata.tables["ip_rules"],
+        Base.metadata.tables["ip_access_logs"],
     ])
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 

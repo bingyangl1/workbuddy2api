@@ -190,6 +190,7 @@ def init_db() -> bool:
         # create_all 对已存在的表不做任何事）。
         _ensure_index("audit_logs", "ix_audit_logs_created_id", ("created_at", "id"))
         _ensure_index("api_tokens", "ix_api_tokens_prefix", ("prefix",))
+        _ensure_index("ip_access_logs", "ix_ip_access_logs_created_id", ("created_at", "id"))
 
         # 迁移：使用记录/日志的查询索引。
         #

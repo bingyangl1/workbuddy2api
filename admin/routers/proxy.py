@@ -306,6 +306,66 @@ def _gate_key(db: Session, request: Request, key: ApiKey, model: str | None,
     return _reject(rej) if rej else None
 
 
+# ---------------------------------------------------------------------------
+# P2 T5：全局入站 IP 管控（在密钥校验**之前**，manager 同序）
+# ---------------------------------------------------------------------------
+
+def _log_ip(db: Session, ip: str, path: str, blocked: bool, ua: str | None,
+            reason: str = "") -> None:
+    """入站访问日志：默认只记被拦的（AUDIT_ALL_ACCESS=1 才记全量）。
+
+    为什么默认不记放行：这张表的用途是安全审计（谁在扫我、谁被挡了），
+    记全量会把信号淹没（manager 实测约 0.2% 拦截率）；放行明细在
+    usage_logs 有完整记录，不重复记不丢信息。旁路容错：写失败不影响请求。
+    """
+    if not blocked and not settings.AUDIT_ALL_ACCESS:
+        return
+    try:
+        from admin.models import IpAccessLog
+        db.add(IpAccessLog(ip=(ip or "")[:64], path=(path or "")[:255],
+                           blocked=1 if blocked else 0, ua=(ua or "")[:255],
+                           reason=(reason or "")[:32]))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def _global_ip_gate(db: Session, request: Request) -> JSONResponse | None:
+    """全局 IP 白/黑名单判定。返回 None 表示放行（含未启用）。
+
+    顺序在密钥校验**之前**（manager 同序）：连来源都不该放行的请求，
+    不值得暴露「密钥是否存在」的任何信号（401 文案差异会被用来扫密钥）。
+    拦截一律 403 + 短码入访问日志——403 让客户端明白「不是密钥问题」。
+
+    读取失败**放行**（fail-open）：security 配置表出问题（如升级中途）
+    不该把整个网关打成 500——IP 管控是加固层，不是可用性依赖。
+    """
+    try:
+        from admin.routers.security import get_config
+        cfg = get_config(db)
+        if not cfg.get("enabled"):
+            return None
+        from admin.models import IpRule
+        rules = [{"kind": r.kind, "cidr": r.cidr} for r in db.query(IpRule).all()]
+    except Exception as e:
+        _logger.warning("全局 IP 管控读取失败，本次放行（fail-open）：%s", e)
+        db.rollback()
+        return None
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent")
+    path = request.url.path
+    mode = cfg.get("mode", "blacklist")
+    if iputil.evaluate(ip, rules, mode):
+        _log_ip(db, ip, path, False, ua)
+        return None
+    reason = "global_not_allowed" if mode == "whitelist" else "global_deny"
+    _log_ip(db, ip, path, True, ua, reason)
+    label = "不在全局白名单内" if mode == "whitelist" else "命中全局黑名单"
+    return JSONResponse(status_code=403, content={
+        "error": {"message": f"来源 IP {ip} {label}", "type": "ip_forbidden",
+                  "code": reason}})
+
+
 def _upstream_extra_headers(request: Request, purpose: str = "conversation",
                             body: dict | None = None,
                             account: "Account | None" = None) -> dict:
@@ -2224,6 +2284,12 @@ async def chat_completions(
     if not api_key:
         return JSONResponse(status_code=401, content={"error": {"message": "缺少 API Key", "type": "auth_error"}})
 
+    # P2 T5 全局 IP 管控（密钥校验之前——连来源都不该放行的请求，
+    # 不值得暴露「密钥是否存在」的任何信号）
+    blocked = _global_ip_gate(db, request)
+    if blocked is not None:
+        return blocked
+
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
@@ -2743,6 +2809,9 @@ async def responses_proxy(
         api_key = authorization[7:].strip()
     if not api_key:
         return JSONResponse(status_code=401, content={"error": {"message": "缺少 API Key", "type": "auth_error"}})
+    blocked = _global_ip_gate(db, request)
+    if blocked is not None:
+        return blocked
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
@@ -3200,6 +3269,9 @@ async def anthropic_messages(
         api_key = authorization[7:].strip()
     if not api_key:
         return JSONResponse(status_code=401, content={"error": {"message": "缺少 API Key", "type": "auth_error"}})
+    blocked = _global_ip_gate(db, request)
+    if blocked is not None:
+        return blocked
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
@@ -3678,6 +3750,9 @@ async def anthropic_count_tokens(
         api_key = authorization[7:].strip()
     if not api_key:
         return JSONResponse(status_code=401, content={"error": {"message": "缺少 API Key", "type": "auth_error"}})
+    blocked = _global_ip_gate(db, request)
+    if blocked is not None:
+        return blocked
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
@@ -3740,6 +3815,9 @@ def models(
         api_key = authorization[7:].strip()
     if not api_key:
         return JSONResponse(status_code=401, content={"error": {"message": "缺少 API Key", "type": "auth_error"}})
+    blocked = _global_ip_gate(db, request)
+    if blocked is not None:
+        return blocked
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
@@ -3875,6 +3953,10 @@ def key_usage(
         return JSONResponse(status_code=401, content={
             "error": {"message": "缺少 API Key，请在 Authorization 头中提供 Bearer 令牌",
                       "type": "auth_error", "code": "missing_api_key"}})
+    # T5 全局 IP 管控同样覆盖自查端点（黑名单里的来源连「还剩多少」都不该问）
+    blocked = _global_ip_gate(db, request)
+    if blocked is not None:
+        return blocked
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={

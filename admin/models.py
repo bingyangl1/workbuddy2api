@@ -302,6 +302,46 @@ class ApiToken(Base):
     last_used_ip = Column(String(64), default="")
 
 
+class IpRule(Base):
+    """全局入站 IP 白/黑名单规则（Phase 2 T5）。
+
+    与每密钥 ip_allowlist 的分工：这张表是**网关级**的第一道闸（在密钥
+    校验**之前**，见 proxy._global_ip_gate），管「哪些来源能摸到 /v1」；
+    每密钥白名单是第二道，管「这把密钥允许哪些来源」。kind: allow/deny；
+    模式（whitelist 默认拒 / blacklist 默认放）在 system_settings.security。
+    """
+
+    __tablename__ = "ip_rules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    kind = Column(String(8), nullable=False, default="deny")  # allow | deny
+    cidr = Column(String(64), nullable=False)
+    note = Column(String(255), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IpAccessLog(Base):
+    """入站访问审计（默认只记**被拦**的，AUDIT_ALL_ACCESS=1 才记全量）。
+
+    为什么默认不记放行：这张表的用途是安全审计（谁在扫我、谁被挡了），
+    记全量会把信号淹没（manager 实测 2 万行里约 0.2% 是拦截记录）；放行
+    明细在 usage_logs 有完整记录，不重复记不丢信息。reason 是短码
+    （global_deny/global_not_allowed/missing_key/invalid_key），
+    界面按短码着色；存量 NULL 按「未记录」展示，不编造。
+    """
+
+    __tablename__ = "ip_access_logs"
+    __table_args__ = (Index("ix_ip_access_logs_created_id", "created_at", "id"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip = Column(String(64), default="")
+    path = Column(String(255), default="")
+    blocked = Column(Integer, default=0)     # 0/1
+    ua = Column(String(255), default="")
+    reason = Column(String(32), default="")  # 拦截原因短码
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Schedule(Base):
     """后台定时任务（如：整点刷新平台总积分、每日同步模型列表）。"""
 
