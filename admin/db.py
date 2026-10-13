@@ -177,6 +177,14 @@ def init_db() -> bool:
         # 迁移：api_keys 加 realm 列（Phase 1 密钥版本隔离：''=不限 / cn / global）
         _ensure_column("api_keys", "realm", "VARCHAR(8)", "DEFAULT ''")
 
+        # 迁移（P2 T3）：api_keys 密钥全维度
+        _ensure_column("api_keys", "expires_at", "DATETIME", "NULL")
+        _ensure_column("api_keys", "max_ips", "INT", "DEFAULT 0")
+        _ensure_column("api_keys", "ip_allowlist", "TEXT", "NULL")
+        _ensure_column("api_keys", "token_quota", "INT", "DEFAULT 0")
+        _ensure_column("api_keys", "used_tokens", "INT", "DEFAULT 0")
+        _ensure_column("api_keys", "last_used_at", "DATETIME", "NULL")
+
         # 迁移（P2 铺轨）：新表 audit_logs / api_tokens 由 create_all 建，
         # 但老库升级路径上索引同样需要显式兜底（见 _ensure_index 的说明：
         # create_all 对已存在的表不做任何事）。

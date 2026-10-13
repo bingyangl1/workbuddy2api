@@ -27,7 +27,7 @@ from admin.config import settings
 from admin.db import SessionLocal, get_db
 from admin.models import Account, AccountModelCooldown, ApiKey, ModelConfig, UsageLog
 from admin.routers.models import _is_model_allowed
-from admin.security import check_quota, get_key_row
+from admin.security import check_quota, get_key_row, validate_key, touch_key
 from admin.pool import POOL
 from upstream_compat import normalize_tool_choice
 
@@ -281,6 +281,29 @@ def _client_ip(request: Request) -> str:
     对端不可信（服务直接暴露时）→ 转发头一律无视，直接回 socket 地址。
     """
     return iputil.client_ip(request)
+
+
+def _reject(rej) -> JSONResponse:
+    """把 Rejection 转成统一 error 响应体（OpenAI 风格 + 本引擎 type 字段）。"""
+    return JSONResponse(
+        status_code=rej.status,
+        content={"error": {"message": str(rej), "type": rej.err_type, "code": rej.code}},
+    )
+
+
+def _gate_key(db: Session, request: Request, key: ApiKey, model: str | None,
+              *, is_model_list: bool = False, mapped_model: str | None = None) -> JSONResponse | None:
+    """P2 T3 统一鉴权闸门：5 个 /v1 入口共用，替代原先只查配额的 check_quota。
+
+    返回 None 表示放行；否则是应直接返回给客户端的 JSONResponse。
+    判定链见 security.validate_key（语义基准 docs/rejection-semantics.md）。
+    """
+    rej = validate_key(
+        key, _client_ip(request), model,
+        is_model_list=is_model_list, mapped_model=mapped_model,
+        key_realm=(getattr(key, "realm", "") or ""),
+    )
+    return _reject(rej) if rej else None
 
 
 def _upstream_extra_headers(request: Request, purpose: str = "conversation",
@@ -2204,10 +2227,6 @@ async def chat_completions(
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
-    try:
-        check_quota(key)
-    except Exception as e:
-        return JSONResponse(status_code=e.status_code, content=e.detail)
 
     try:
         payload = await request.json()
@@ -2215,6 +2234,13 @@ async def chat_completions(
         return JSONResponse(status_code=400, content={"error": {"message": "bad json", "type": "invalid_request"}})
 
     model = payload.get("model", "auto")
+
+    # P2 T3 统一闸门：停用/过期/双配额/IP 白名单/max_ips（realm 隔离在下方
+    # 前缀剥离后按既有 P1 块判定——判据是「剥离后的 realm 前缀」，与
+    # validate_key 第 7 步的「映射后模型名」是**不同对象**，两处各管各的）
+    gated = _gate_key(db, request, key, str(model or ""))
+    if gated is not None:
+        return gated
 
     # ---- realm 前缀路由 + 密钥 realm 隔离（Go server/resolve_model.go 语义）----
     # "cn:model" / "global:model" 前缀剥离后限定该 realm 的账号；
@@ -2600,6 +2626,10 @@ async def chat_completions(
                                           cached_tokens=usage["cached_tokens"],
                                           seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms,
                                           error_kind="success")
+                            # P2 T3：绑定来源 IP + 累计真实 token（credit 由 _record_usage
+                            # 统一记，不重复）。仅成功路径——失败/截断不计入配额。
+                            touch_key(key.id, _client_ip(request),
+                                      tokens=usage["total_tokens"] or 0)
                             if aggregate:
                                 # 聚合模式下客户端要的是一个 JSON 对象，
                                 # 而不是 text/event-stream。这里 yield **字符串**
@@ -2716,15 +2746,16 @@ async def responses_proxy(
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
-    try:
-        check_quota(key)
-    except Exception as e:
-        return JSONResponse(status_code=e.status_code, content=e.detail)
 
     try:
         payload = await request.json()
     except Exception:
         return JSONResponse(status_code=400, content={"error": {"message": "bad json", "type": "invalid_request"}})
+
+    # P2 T3 统一闸门（同 /v1/chat/completions）
+    gated = _gate_key(db, request, key, str(payload.get("model", "auto") or ""))
+    if gated is not None:
+        return gated
 
     try:
         chat_body = responses_request_to_chat(payload)
@@ -3098,6 +3129,9 @@ async def responses_proxy(
                                           cached_tokens=usage["cached_tokens"],
                                           seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms,
                                           error_kind="success")
+                            # P2 T3：同 chat 成功路径
+                            touch_key(key.id, _client_ip(request),
+                                      tokens=usage["total_tokens"] or 0)
                             return
                         except Exception as e:
                             if delivered:
@@ -3169,15 +3203,16 @@ async def anthropic_messages(
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
-    try:
-        check_quota(key)
-    except Exception as e:
-        return JSONResponse(status_code=e.status_code, content=e.detail)
 
     try:
         payload = await request.json()
     except Exception:
         return JSONResponse(status_code=400, content={"error": {"message": "bad json", "type": "invalid_request"}})
+
+    # P2 T3 统一闸门（同 /v1/chat/completions）
+    gated = _gate_key(db, request, key, str(payload.get("model", "auto") or ""))
+    if gated is not None:
+        return gated
 
     if not payload.get("messages"):
         return JSONResponse(status_code=400,
@@ -3582,6 +3617,9 @@ async def anthropic_messages(
                                           cached_tokens=usage["cached_tokens"],
                                           seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms,
                                           error_kind="success")
+                            # P2 T3：同 chat 成功路径
+                            touch_key(key.id, _client_ip(request),
+                                      tokens=usage["total_tokens"] or 0)
                             return
                         except Exception as e:
                             if delivered:
@@ -3640,8 +3678,27 @@ async def anthropic_count_tokens(
         api_key = authorization[7:].strip()
     if not api_key:
         return JSONResponse(status_code=401, content={"error": {"message": "缺少 API Key", "type": "auth_error"}})
-    if not get_key_row(db, api_key):
+    key = get_key_row(db, api_key)
+    if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
+
+    # T0 特别裁决：本地估算不耗额度 → 只判停用/过期/IP 规则，跳过配额。
+    # validate_key 没有「跳配额」开关，这里逐项调底层判据（顺序与完整链一致）。
+    from admin.security import Rejection, key_ip_allowlist
+    from admin import iputil as _ipu
+    _rej = None
+    if key.status != "active":
+        _rej = Rejection("API Key 已停用", 403, "key_disabled", "key_disabled")
+    elif key.expires_at and key.expires_at < datetime.utcnow():
+        _rej = Rejection("API Key 已过期", 403, "key_expired", "key_expired")
+    else:
+        _allow = key_ip_allowlist(key)
+        _ip = _client_ip(request)
+        if _allow and not any(_ipu.ip_matches(_ip, c) for c in _allow):
+            _rej = Rejection(f"来源 IP {_ip} 不在密钥白名单内", 400,
+                             "invalid_request_error", "ip_not_allowed")
+    if _rej is not None:
+        return _reject(_rej)
 
     try:
         payload = await request.json()
@@ -3686,10 +3743,12 @@ def models(
     key = get_key_row(db, api_key)
     if not key:
         return JSONResponse(status_code=401, content={"error": {"message": "无效 API Key", "type": "auth_error"}})
-    try:
-        check_quota(key)
-    except Exception as e:
-        return JSONResponse(status_code=e.status_code, content=e.detail)
+    # P2 T3 闸门（is_model_list=True：不判 realm/模型白名单——模型发现没有
+    # 版本可言，拦了限定密钥连「我有哪些模型」都问不到；真正的隔离由调用时
+    # 的模型名把关。manager 同口径）
+    gated = _gate_key(db, request, key, None, is_model_list=True)
+    if gated is not None:
+        return gated
 
     # ---- realm 隔离 + 前缀返回（Go modelList：CN 动态加 cn:，global 加 global:）----
     key_realm = (getattr(key, "realm", "") or "").strip().lower()

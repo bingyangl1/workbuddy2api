@@ -1,6 +1,8 @@
 """API Key 管理：创建（带积分限额）/ 列表 / 查看 / 调整 / 吊销 / 用量。"""
 import base64
+import json
 import secrets
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -8,10 +10,13 @@ from sqlalchemy.orm import Session
 
 from admin.audit import current_actor, log_request
 from admin.db import get_db
-from admin.models import ApiKey, ModelGroup
-from admin.security import hash_key, require_admin
+from admin.models import ApiKey, ApiKeyIp, ModelGroup
+from admin.security import hash_key, key_ip_allowlist, require_admin, _norm_cidrs
 
 router = APIRouter(prefix="/api/keys", tags=["keys"])
+
+#: 密钥 realm 合法值（''=不限；与 accounts.realm 同口径）
+_REALMS = ("", "cn", "global")
 
 
 class KeyIn(BaseModel):
@@ -20,6 +25,31 @@ class KeyIn(BaseModel):
     unlimited: bool = False
     note: str = ""
     group_id: int = 0  # 0 = 不绑定分组（可用全部启用模型）
+    # ---- P2 T3：全维度 ----
+    realm: str = ""                     # '' / cn / global（P1 列已存在，本次补 API）
+    expires_at: str | None = None       # ISO 字符串；None/'' = 永不过期
+    max_ips: int = 0                    # 0 = 不限
+    ip_allowlist: list[str] = []        # 单 IP 或 CIDR；空 = 不限
+    token_quota: int = 0                # 0 = 不限（0 不可能是有效配额）
+
+
+def _parse_expires(raw: str | None) -> datetime | None:
+    """ISO 字符串 → datetime；None/空串 → None。非法格式 400。"""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).strip())
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail=f"expires_at 格式非法：{raw}（示例：2027-03-01T00:00:00）")
+
+
+def _validate_realm(raw: str) -> str:
+    v = (raw or "").strip().lower()
+    if v not in _REALMS:
+        raise HTTPException(status_code=400,
+                            detail=f"realm 只能是 '' / cn / global，收到：{raw}")
+    return v
 
 
 def _gen_key() -> str:
@@ -60,6 +90,16 @@ def list_keys(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
             "note": k.note,
             "group_id": int(k.group_id or 0),
             "group_name": group_names.get(int(k.group_id or 0), ""),
+            # ---- P2 T3 ----
+            "realm": (k.realm or ""),
+            "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+            "expired": bool(k.expires_at and k.expires_at < datetime.utcnow()),
+            "max_ips": int(k.max_ips or 0),
+            "ip_allowlist": key_ip_allowlist(k),
+            "bound_ips": db.query(ApiKeyIp).filter(ApiKeyIp.key_id == k.id).count(),
+            "token_quota": int(k.token_quota or 0),
+            "used_tokens": int(k.used_tokens or 0),
+            "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
             "created_at": k.created_at.isoformat() if k.created_at else None,
         }
         for k in rows
@@ -89,13 +129,19 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
         unlimited=1 if body.unlimited else 0,
         note=body.note,
         group_id=gid,
+        realm=_validate_realm(body.realm),
+        expires_at=_parse_expires(body.expires_at),
+        max_ips=int(body.max_ips or 0),
+        ip_allowlist=json.dumps(_norm_cidrs(body.ip_allowlist)),
+        token_quota=int(body.token_quota or 0),
     )
     db.add(k)
     db.commit()
     db.refresh(k)
     # 审计：key 创建成功（明文只写进响应，绝不落审计日志）
     log_request(current_actor(), "create_key", target=f"{k.id}:{k.name}",
-                detail=f"limit={body.credit_limit},unlimited={bool(k.unlimited)}",
+                detail=f"limit={body.credit_limit},unlimited={bool(k.unlimited)},"
+                       f"realm={k.realm},token_quota={k.token_quota}",
                 request=request)
     # 明文 key 仅此返回一次
     return {
@@ -106,6 +152,11 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
         "credit_limit": k.credit_limit,
         "unlimited": bool(k.unlimited),
         "group_id": int(k.group_id or 0),
+        "realm": k.realm,
+        "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+        "max_ips": int(k.max_ips or 0),
+        "ip_allowlist": key_ip_allowlist(k),
+        "token_quota": int(k.token_quota or 0),
     }
 
 
@@ -170,8 +221,23 @@ def patch_key(key_id: int, body: dict, _: bool = Depends(require_admin), db: Ses
         k.note = body["note"]
     if "group_id" in body:
         k.group_id = _validate_group(db, body["group_id"])
+    # ---- P2 T3：全维度（显式传 null/'' 是**允许**的——改回「不限」；
+    #      所以不能用真值判断，必须按「键在不在 body 里」区分）----
+    if "realm" in body:
+        k.realm = _validate_realm(body["realm"])
+    if "expires_at" in body:
+        k.expires_at = _parse_expires(body["expires_at"])
+    if "max_ips" in body:
+        k.max_ips = int(body["max_ips"] or 0)
+    if "ip_allowlist" in body:
+        k.ip_allowlist = json.dumps(_norm_cidrs(body["ip_allowlist"]))
+    if "token_quota" in body:
+        k.token_quota = int(body["token_quota"] or 0)
     if body.get("reset_used"):
+        # 与 manager reset_usage 同口径：两个量一起归零——界面上是同一个
+        # 「重置用量」按钮，只清积分不清 token 会留下看不见的残留额度
         k.credit_used = 0
+        k.used_tokens = 0
     db.commit()
     # 审计：detail 只记改了哪些**字段名**，不写值（值可能含 key 相关明文）
     log_request(current_actor(), "update_key", target=f"{k.id}:{k.name}",
@@ -188,5 +254,8 @@ def delete_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depe
     log_request(current_actor(), "delete_key", target=f"{k.id}:{k.name}",
                 detail=f"prefix={k.key_prefix}", request=request)
     db.delete(k)
+    # 级联清理 IP 绑定记录（与 manager delete_key 同口径）——留着会让
+    # 「删了重建同名密钥」的 max_ips 判定继承旧绑定，用户会莫名其妙被拒
+    db.query(ApiKeyIp).filter(ApiKeyIp.key_id == key_id).delete()
     db.commit()
     return {"id": key_id, "ok": True}

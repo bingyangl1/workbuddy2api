@@ -120,8 +120,37 @@ class ApiKey(Base):
     group_id = Column(Integer, default=0)
     # realm 限定：''=不限（存量默认） / 'cn' / 'global'。跨 realm 调用 403
     realm = Column(String(8), nullable=False, default="")
+    # ---- P2 T3：密钥全维度 ----
+    # 有效期：NULL = 永不过期
+    expires_at = Column(DateTime, nullable=True)
+    # 每密钥 IP 数上限（0 = 不限）。判定基于 api_key_ips 的累计绑定数
+    max_ips = Column(Integer, default=0)
+    # 每密钥 IP 白名单（JSON 数组，元素为单 IP 或 CIDR）。空数组 = 不限
+    ip_allowlist = Column(Text, default="[]")
+    # Token 配额：0 = 不限（0 不可能是有效配额）。仅计上游真实返回的 total_tokens
+    token_quota = Column(Integer, default=0)
+    used_tokens = Column(Integer, default=0)
+    # 最近一次成功发起请求的时间（touch() 落库，60s 节流之外始终精确到请求级）
+    last_used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ApiKeyIp(Base):
+    """密钥绑定过的来源 IP（max_ips 判定的累计事实）。
+
+    为什么单独一张表而不是记在 key 上：max_ips 是「**绑定数**上限」，
+    语义是「这把密钥一共从多少个不同的 IP 发过请求」，而不是「当前在线」。
+    记录在删除密钥时级联清理（keys 路由 delete 里显式删，见 manager delete_key）。
+    """
+
+    __tablename__ = "api_key_ips"
+
+    # 复合主键：同一密钥同一 IP 只记一次（INSERT IGNORE 语义，MySQL 无原生
+    # OR IGNORE，用 merge 或先查后插——见 security.touch_key）
+    key_id = Column(Integer, primary_key=True)
+    ip = Column(String(64), primary_key=True)
+    first_seen = Column(DateTime, default=datetime.utcnow)
 
 
 class ModelGroup(Base):
