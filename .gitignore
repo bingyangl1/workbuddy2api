@@ -91,3 +91,10 @@ desktop/assets/*.png
 tests/*
 !tests/test_desktop.py
 
+
+# ===== 逆向提取的密钥与解密产物（绝不能上传） =====
+_extracted_keys.json
+_atrest_secret.json
+_atrest_secret.err
+_wb_keyhook.js
+*.decrypted.json
