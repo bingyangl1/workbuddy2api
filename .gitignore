@@ -100,3 +100,12 @@ _atrest_secret.json
 _atrest_secret.err
 _wb_keyhook.js
 *.decrypted.json
+
+# ===== 前端（P3 面板现代化）构建产物与暂存 =====
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
+# manager 业务页/组件暂存区（Wave B 逐页适配时取回；不进仓）
+web-wip/

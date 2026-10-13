@@ -1,0 +1,302 @@
+/**
+ * 本引擎（workbuddy2api）typed API client。唯一契约真源是 admin/routers/*.py
+ * （125 条路由），**不是** workbuddy-manager 的契约。
+ *
+ * 与 manager 的根本差异（鉴权模型）：
+ *   manager = cookie 会话（withCredentials + /api/me + 多用户角色）；
+ *   本引擎 = JWT 头（POST /api/login 返回 {token}，后续请求带 X-Admin-Token 头）。
+ * token 存 sessionStorage（关标签页即失效，沿用 manager 的 wb-me 缓存键思路）。
+ */
+import axios, {AxiosError} from 'axios';
+import {BASE_PATH} from './base-path';
+import {t, tp} from './i18n';
+import type {
+  Account,
+  AccountGroup,
+  ApiKey,
+  ApiToken,
+  AuditLog,
+  ClientProfile,
+  CreatedApiKey,
+  CreatedApiToken,
+  CreditDetails,
+  CreditExpiryStats,
+  IpAccessLog,
+  IpRule,
+  KeyUsage,
+  LoginResponse,
+  ModelBusyResponse,
+  ModelConfig,
+  ModelGroup,
+  ModelHealth,
+  ScanLocalResult,
+  Schedule,
+  SecurityConfig,
+  UsageLogPage,
+  UsageStats,
+  VersionInfo,
+} from './types';
+
+export const http = axios.create({
+  baseURL: BASE_PATH,
+  timeout: 60000,
+});
+
+const TOKEN_KEY = 'wb-admin-token';
+
+export function readToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+export function writeToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+}
+
+// 每个请求注入 JWT（本引擎 require_admin 读 X-Admin-Token 头）。
+http.interceptors.request.use((config) => {
+  const token = readToken();
+  if (token) config.headers['X-Admin-Token'] = token;
+  return config;
+});
+
+// 401 → 清登录态跳登录页（公开页 /login、/join 不跳）。
+http.interceptors.response.use(
+  (r) => r,
+  (error: AxiosError) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      writeToken(null);
+      const path = window.location.pathname;
+      const loginPath = `${BASE_PATH}/login`;
+      const publicPaths = [loginPath, `${BASE_PATH}/join`];
+      if (!publicPaths.some((p) => path.startsWith(p))) {
+        window.location.href = loginPath;
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
+/** 统一抽取后端错误信息（detail 优先；本引擎报错是中文，过短语表翻译）。 */
+export function errText(e: unknown): string {
+  const ax = e as AxiosError<{detail?: string; error?: string}>;
+  const d = ax?.response?.data;
+  const raw = (typeof d === 'string' ? d : d?.detail || d?.error) || '';
+  if (raw) return tp(raw);
+  if (ax?.response?.status === 403) return t('error.forbidden');
+  const fallback = ax?.message || '';
+  return fallback ? tp(fallback) : tp('请求失败');
+}
+
+const get = async <T>(url: string, params?: Record<string, unknown>): Promise<T> =>
+  (await http.get<T>(url, {params})).data;
+const post = async <T>(url: string, body?: unknown): Promise<T> =>
+  (await http.post<T>(url, body)).data;
+const patch = async <T>(url: string, body?: unknown): Promise<T> =>
+  (await http.patch<T>(url, body)).data;
+const put = async <T>(url: string, body?: unknown): Promise<T> =>
+  (await http.put<T>(url, body)).data;
+const del = async <T>(url: string): Promise<T> => (await http.delete<T>(url)).data;
+
+/* ── 鉴权（server.py）─────────────────────────────────────────────
+ * POST /api/login 是 **Form 表单**（username/password），返回 {token}。
+ * 无 /api/me——JWT 有效性由每个请求的 401 判定（拦截器已处理）。 */
+export const authApi = {
+  login: async (username: string, password: string): Promise<LoginResponse> => {
+    const form = new URLSearchParams();
+    form.set('username', username);
+    form.set('password', password);
+    const res = await http.post<LoginResponse>('/api/login', form, {
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    });
+    return res.data;
+  },
+  changePassword: (oldPassword: string, newPassword: string) =>
+    patch<{ok: boolean}>('/api/admin/password', {
+      old_password: oldPassword,
+      new_password: newPassword,
+    }),
+};
+
+/* ── 账号池（routers/accounts.py）───────────────────────────────── */
+export const accountApi = {
+  list: () => get<{items: Account[]}>('/api/accounts'),
+  create: (body: {name: string; uid?: string; realm?: string; note?: string}) =>
+    post<Account>('/api/accounts', body),
+  update: (id: number, body: Partial<Account>) => patch<Account>(`/api/accounts/${id}`, body),
+  remove: (id: number) => del<{ok: boolean}>(`/api/accounts/${id}`),
+  refresh: (id: number) =>
+    post<{id: number; balance_total: number | null; balance_remain: number | null}>(
+      `/api/accounts/${id}/refresh`),
+  creditDetails: (id: number, refresh = false) =>
+    get<CreditDetails>(`/api/accounts/${id}/credit-details`, refresh ? {refresh: 1} : undefined),
+  modelLimits: () => get<{items: Record<string, unknown>}>('/api/accounts/model-limits'),
+  clearModelLimit: (id: number) =>
+    post<{ok: boolean; cleared: number}>(`/api/accounts/${id}/model-limits/clear`),
+  duplicates: () => get<{items: {uid: string; keep_id: number; dup_ids: number[]}[]}>(
+    '/api/accounts/duplicates'),
+  dedupe: () => post<{ok: boolean; removed: number}>('/api/accounts/dedupe'),
+  syncCredits: () => post<{ok: boolean; synced: number}>('/api/accounts/credits/sync'),
+  scanLocal: () => get<ScanLocalResult>('/api/accounts/scan-local'),
+  importLocal: () => post<{ok: boolean; imported: number}>('/api/accounts/import-local'),
+  exportAll: async () =>
+    (await http.get<Blob>('/api/accounts/export', {responseType: 'blob'})).data,
+  exportOne: (id: number) => get<{id: number; uid: string; item: unknown}>(
+    `/api/accounts/${id}/export`),
+  inject: (id: number) => post<{ok: boolean; message: string}>(`/api/accounts/${id}/inject`),
+  requestUsage: (id: number, params?: Record<string, unknown>) =>
+    get<Record<string, unknown>>(`/api/accounts/${id}/request-usage`, params),
+};
+
+/* ── API 密钥（routers/keys.py，含 P2 T3 全维度）────────────────── */
+export const keyApi = {
+  list: () => get<{items: ApiKey[]}>('/api/keys'),
+  create: (body: Partial<ApiKey> & {name: string}) => post<CreatedApiKey>('/api/keys', body),
+  update: (id: number, body: Partial<ApiKey>) => patch<ApiKey>(`/api/keys/${id}`, body),
+  remove: (id: number) => del<{ok: boolean}>(`/api/keys/${id}`),
+  usage: (id: number) => get<KeyUsage>(`/api/keys/${id}/usage`),
+  /** 完整明文——JWT-only，wbt_ 只读 token 摸不到（T9 刻意保留 require_admin）。 */
+  view: (id: number) => get<{id: number; key: string}>(`/api/keys/${id}/view`),
+  resetUsage: (id: number) => post<{ok: boolean}>(`/api/keys/${id}/reset-usage`),
+};
+
+/* ── 模型（routers/models.py + groups.py）───────────────────────── */
+export const modelApi = {
+  configs: (level?: string) =>
+    get<{items: ModelConfig[]}>('/api/models/configs', level ? {level} : undefined),
+  toggle: (id: number, enabled: boolean) =>
+    patch<{id: number; model_id: string; enabled: boolean}>(`/api/models/${id}`, {enabled}),
+  batchToggle: (ids: number[], enabled: boolean) =>
+    post<{updated: number; enabled: boolean}>('/api/models/batch-toggle', {ids, enabled}),
+  remove: (id: number) => del<{id: number; model_id: string; ok: boolean}>(`/api/models/${id}`),
+  sync: () => post<{ok: boolean; added: number}>('/api/models/sync'),
+  busy: () => get<ModelBusyResponse>('/api/models/busy'),
+  speedTest: () => post<{ok: boolean}>('/api/models/speed-test'),
+  // 模型分组
+  groups: () => get<{items: ModelGroup[]}>('/api/groups'),
+  createGroup: (body: {name: string; models: string[]}) => post<ModelGroup>('/api/groups', body),
+  updateGroup: (id: number, body: {name?: string; models?: string[]}) =>
+    put<ModelGroup>(`/api/groups/${id}`, body),
+  deleteGroup: (id: number) => del<{ok: boolean}>(`/api/groups/${id}`),
+};
+
+/* ── 账号池分组（routers/account_groups.py，P2 T8）──────────────── */
+export const accountGroupApi = {
+  list: () => get<{items: AccountGroup[]}>('/api/account-groups'),
+  create: (body: {name: string; note?: string}) => post<AccountGroup>('/api/account-groups', body),
+  update: (id: number, body: {name?: string; note?: string}) =>
+    patch<AccountGroup>(`/api/account-groups/${id}`, body),
+  remove: (id: number) => del<{ok: boolean}>(`/api/account-groups/${id}`),
+  assign: (groupId: number, accountId: number) =>
+    post<{ok: boolean}>(`/api/account-groups/${groupId}/accounts/${accountId}`),
+  unassign: (accountId: number) =>
+    post<{ok: boolean}>(`/api/account-groups/accounts/${accountId}/unassign`),
+};
+
+/* ── 用量日志（routers/logs.py）─────────────────────────────────── */
+export const logApi = {
+  list: (params?: Record<string, unknown>) => get<UsageLogPage>('/api/logs', params),
+  summary: (params?: Record<string, unknown>) => get<Record<string, unknown>>('/api/logs/summary', params),
+  accounts: (days = 30) => get<{items: {id: number; name: string}[]}>('/api/logs/accounts', {days}),
+  exportUrl: (params?: Record<string, unknown>) => {
+    const qs = new URLSearchParams();
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v != null && v !== '') qs.set(k, String(v));
+    });
+    return `${BASE_PATH}/api/logs/export${qs.toString() ? `?${qs}` : ''}`;
+  },
+};
+
+/* ── 统计（routers/stats.py）────────────────────────────────────── */
+export const statsApi = {
+  usage: (params?: {days?: number; granularity?: string; key_id?: number; model?: string;
+                    account_id?: number; use_case?: string}) =>
+    get<UsageStats>('/api/stats/usage', params as Record<string, unknown>),
+  options: (days = 30) =>
+    get<{keys: {id: number; name: string}[]; models: string[]; endpoints: string[]}>(
+      '/api/stats/usage/options', {days}),
+  modelHealth: (hours = 24) => get<{items: ModelHealth[]}>('/api/stats/model-health', {hours}),
+};
+
+/* ── 积分（routers/credits.py）──────────────────────────────────── */
+export const creditsApi = {
+  expiry: (params?: {days?: number; include_disabled?: boolean}) =>
+    get<CreditExpiryStats>('/api/credits/expiry', params as Record<string, unknown>),
+  usage: (params?: {days?: number; account_id?: number; top?: number}) =>
+    get<Record<string, unknown>>('/api/credits/usage', params as Record<string, unknown>),
+};
+
+/* ── 安全 / IP（routers/security.py，P2 T5/T6）──────────────────── */
+export const securityApi = {
+  config: () => get<SecurityConfig>('/api/security/config'),
+  saveConfig: (body: SecurityConfig) => post<SecurityConfig>('/api/security/config', body),
+  rules: () => get<{items: IpRule[]}>('/api/security/rules'),
+  addRule: (body: {kind: 'allow' | 'deny'; cidr: string; note?: string}) =>
+    post<IpRule>('/api/security/rules', body),
+  removeRule: (id: number) => del<{ok: boolean}>(`/api/security/rules/${id}`),
+  logs: (limit = 200) => get<{items: IpAccessLog[]}>('/api/security/logs', {limit}),
+  clearLogs: () => post<{ok: boolean}>('/api/security/logs/clear'),
+  modelMap: () => get<{map: Record<string, string>}>('/api/security/model-map'),
+  saveModelMap: (map: Record<string, string>) =>
+    post<{map: Record<string, string>}>('/api/security/model-map', {map}),
+};
+
+/* ── 审计（routers/audit.py，P2 T2）────────────────────────────── */
+export const auditApi = {
+  list: (params?: {limit?: number; offset?: number; action?: string}) =>
+    get<{items: AuditLog[]}>('/api/audit', params as Record<string, unknown>),
+  clear: () => post<{ok: boolean; cleared: number}>('/api/audit/clear'),
+};
+
+/* ── 访问令牌（routers/tokens.py，P2 T7，wbt_ 只读）────────────── */
+export const tokenApi = {
+  list: () => get<{items: ApiToken[]}>('/api/tokens'),
+  create: (body: {name: string; expires_at?: string | null}) =>
+    post<CreatedApiToken>('/api/tokens', body),
+  update: (id: number, body: {name?: string; enabled?: boolean; expires_at?: string | null}) =>
+    patch<ApiToken>(`/api/tokens/${id}`, body),
+  remove: (id: number) => del<{ok: boolean}>(`/api/tokens/${id}`),
+};
+
+/* ── 定时任务（routers/schedules.py）────────────────────────────── */
+export const scheduleApi = {
+  list: () => get<{items: Schedule[]}>('/api/schedules'),
+  create: (body: Partial<Schedule>) => post<{id: number; ok: boolean}>('/api/schedules', body),
+  update: (id: number, body: Partial<Schedule>) =>
+    patch<{id: number; ok: boolean}>(`/api/schedules/${id}`, body),
+  toggle: (id: number) => post<{id: number; enabled: boolean}>(`/api/schedules/${id}/toggle`),
+  runNow: (id: number) => post<{ok: boolean; error?: string}>(`/api/schedules/${id}/run`),
+  remove: (id: number) => del<{id: number; ok: boolean}>(`/api/schedules/${id}`),
+};
+
+/* ── 客户端参数（routers/client_profile.py）────────────────────── */
+export const clientProfileApi = {
+  get: () => get<ClientProfile>('/api/client-profile'),
+  save: (body: Record<string, unknown>) => put<ClientProfile>('/api/client-profile', body),
+  detect: () => post<ClientProfile>('/api/client-profile/detect'),
+  reset: () => post<{ok: boolean}>('/api/client-profile/reset'),
+};
+
+/* ── 线上同步（routers/sync.py）────────────────────────────────── */
+export const syncApi = {
+  config: () => get<Record<string, unknown>>('/api/sync/config'),
+  saveConfig: (body: Record<string, unknown>) =>
+    post<Record<string, unknown>>('/api/sync/config', body),
+  push: () => post<{ok: boolean; pushed: number}>('/api/sync/push'),
+};
+
+/* ── 系统（server.py + routers/releases.py）────────────────────── */
+export const systemApi = {
+  version: () => get<VersionInfo>('/api/app/version'),
+};
+
+export type {Account};
