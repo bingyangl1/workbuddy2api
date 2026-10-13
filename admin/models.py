@@ -221,6 +221,58 @@ class SystemSetting(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AuditLog(Base):
+    """管理端审计日志：谁、何时、对什么目标、做了什么、结果与来源。
+
+    为什么单独一张表（manager 同款）：这些操作不产生请求日志（那是网关的），
+    出了事只能靠反代 access log 去猜。管理端是公网入口，敏感操作（增删账号、
+    key 变更/查看、改密码、改安全配置）必须可追溯。
+
+    写入永远走 admin/audit.py 的旁路容错封装——审计挂了不能影响请求本身。
+    """
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (Index("ix_audit_logs_created_id", "created_at", "id"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # 操作者：管理端 JWT 用户名 / wbt_ token 名 / 'anonymous'（未认证触达）
+    actor = Column(String(120), nullable=False, default="")
+    # 动作短码：create_account / delete_key / view_key_full / update_security ...
+    action = Column(String(64), nullable=False, default="")
+    # 被操作对象（如被删的账号 id、被改的密钥名）
+    target = Column(String(255), default="")
+    # 结果/细节摘要（不含敏感明文：token/密码永不写入）
+    detail = Column(String(500), default="")
+    # 来源 IP（严格口径，见 admin/iputil.py）
+    ip = Column(String(64), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ApiToken(Base):
+    """管理面作用域 API Token（wbt_ 前缀）：给脚本 / 看板 / CI 的只读凭据。
+
+    与网关密钥（ApiKey，sk_ 前缀）**刻意分开**：那套授权的是模型调用，
+    这套授权的是管理面读取。安全要求更高（见 admin/tokensvc.py）：
+    明文只在创建时返回一次，库中只存 SHA-256；scope 一律 readonly。
+    """
+
+    __tablename__ = "api_tokens"
+    __table_args__ = (Index("ix_api_tokens_prefix", "prefix"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), default="")
+    token_hash = Column(String(128), nullable=False)  # SHA-256 hex
+    prefix = Column(String(16), default="")            # wbt_ + 前 8 位，定位用
+    # 作用域：'readonly'（本引擎唯一合法值；非法值读取时降级为 readonly）
+    scope = Column(String(16), nullable=False, default="readonly")
+    enabled = Column(Integer, default=1)
+    expires_at = Column(DateTime, nullable=True)       # NULL = 永不过期
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String(120), default="")
+    last_used_at = Column(DateTime, nullable=True)
+    last_used_ip = Column(String(64), default="")
+
+
 class Schedule(Base):
     """后台定时任务（如：整点刷新平台总积分、每日同步模型列表）。"""
 

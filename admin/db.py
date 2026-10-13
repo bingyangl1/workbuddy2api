@@ -177,6 +177,12 @@ def init_db() -> bool:
         # 迁移：api_keys 加 realm 列（Phase 1 密钥版本隔离：''=不限 / cn / global）
         _ensure_column("api_keys", "realm", "VARCHAR(8)", "DEFAULT ''")
 
+        # 迁移（P2 铺轨）：新表 audit_logs / api_tokens 由 create_all 建，
+        # 但老库升级路径上索引同样需要显式兜底（见 _ensure_index 的说明：
+        # create_all 对已存在的表不做任何事）。
+        _ensure_index("audit_logs", "ix_audit_logs_created_id", ("created_at", "id"))
+        _ensure_index("api_tokens", "ix_api_tokens_prefix", ("prefix",))
+
         # 迁移：使用记录/日志的查询索引。
         #
         # 为什么必须在迁移里建而不是只靠 create_all：老库的表已经存在，

@@ -122,6 +122,34 @@ class Settings:
     # 可以直接用真实到期时间排序，不必再靠录入时间猜。
     ACCOUNT_SELECT = os.getenv("ADMIN_ACCOUNT_SELECT", "expiring")
 
+    # ---------- 入站 IP 解析（Phase 2 T1，移植 manager iputil） ----------
+    #: 是否采信反向代理写入的转发头（X-Real-IP / X-Forwarded-For）。
+    #:
+    #: XFF 与 X-Real-IP 都是**客户端可伪造**的普通请求头；反代以 $remote_addr
+    #: 覆写 X-Real-IP 只是「通常如此」，前提是请求确实经过那个反代。直接暴露
+    #: 部署（systemd 默认 0.0.0.0）时任何人加一行 `X-Real-IP: 9.9.9.9` 就能冒充
+    #: 任意来源，全局 IP 白/黑名单、密钥 IP 白名单与 max_ips、登录失败锁定
+    #: 全部形同虚设。所以采信的前提是 **TCP 对端落在可信代理网段内**。
+    TRUST_PROXY = os.getenv("ADMIN_TRUST_PROXY", "1") == "1"
+    #: 可信代理跳数：从 XFF **右往左**数第 N 个是真实客户端（右侧是反代追加
+    #: 的真实地址，左侧才是可伪造部分）。前面直接是 nginx/1Panel 时保持 1；
+    #: 若还挂了 CDN 则设为 CDN + 反代的层数。
+    TRUSTED_PROXY_HOPS = int(os.getenv("ADMIN_TRUSTED_PROXY_HOPS", "1"))
+    #: 可信代理的来源网段（逗号分隔，支持 CIDR）。默认含回环 + 常见私网：
+    #: 标准部署（反代与本体同机）开箱即用；反代在另一台机器时把它的网段加进来。
+    TRUSTED_PROXY_CIDRS = [
+        c.strip() for c in os.getenv(
+            "ADMIN_TRUSTED_PROXY_CIDRS",
+            "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",
+        ).split(",") if c.strip()
+    ]
+    #: 入站访问日志是否记录**放行**的请求（Phase 2 T5 用）。
+    #: 默认关闭：那张表的用途是安全审计（谁在扫我、谁被挡了），记全量会把
+    #: 信号淹没（manager 实测 2 万行里只有 0.2% 是拦截记录）。放行明细在
+    #: usage_logs 有完整记录，不重复记不丢信息。核对「某 IP 来过什么」时
+    #: 临时设 1。
+    AUDIT_ALL_ACCESS = os.getenv("ADMIN_AUDIT_ALL_ACCESS", "0") == "1"
+
     # ---------- 开发 / 测试辅助工具 ----------
     #: 逆向产物（客户端源码）管理：后台一键拆包 app.asar、手动指定安装目录。
     #:
