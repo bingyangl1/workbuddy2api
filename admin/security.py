@@ -40,6 +40,50 @@ def require_admin(x_admin_token: str = Header(default=None, alias="X-Admin-Token
     return True
 
 
+def require_admin_read(x_admin_token=Header(default=None, alias="X-Admin-Token"),
+                       authorization: str = Header(default=None)):
+    """读端点依赖：JWT 管理员 或 wbt_ 只读 token 双通道。
+
+    JWT 全权（本引擎单管理员）；wbt_ 只授权 GET。
+    T7 只实现依赖本体；T9 才批量套到既有 GET 端点。
+
+    通道顺序：先走 X-Admin-Token（JWT）；失败再取
+    `Authorization: Bearer wbt_...`（只认 Bearer，manager 同款，
+    X-API-Key 历史提权后门绝不复活）→ tokensvc.resolve + usable。
+
+    两者都失败 → 401「无效令牌」——**不区分**失败原因
+    （不存在 / 已停用 / 已过期 / 格式错误对探测者不可分辨）。
+    返回值："admin"（JWT 全权）或 ApiToken 行（wbt_ 只读），
+    供路由层/审计区分操作者身份。
+    """
+    # 先试 JWT 通道：verify_admin_token 失败抛 401，这里捕获后走第二通道。
+    try:
+        verify_admin_token(x_admin_token)
+        return "admin"
+    except HTTPException:
+        pass
+
+    # wbt_ 只读通道：只认 Authorization: Bearer wbt_...
+    if authorization:
+        scheme, _, cred = authorization.partition(" ")
+        if scheme.lower() == "bearer" and cred.startswith("wbt_"):
+            # 局部 import 避免循环依赖：tokensvc 不得 import security。
+            # SessionLocal 用本模块顶层已导入的名字（便于测试替换）。
+            from admin import tokensvc
+
+            db = SessionLocal()
+            try:
+                row = tokensvc.resolve(db, cred)
+                if row is not None and tokensvc.usable(row):
+                    tokensvc.touch(db, row.id, "")  # IP 留空；T9 挂 Request 时补
+                    return row
+            finally:
+                db.close()
+
+    # 不区分「JWT 无效 / token 不存在 / 停用 / 过期」——统一无效。
+    raise HTTPException(status_code=401, detail="无效令牌")
+
+
 # ---------------------------------------------------------------------------
 # 管理后台密码（PBKDF2 哈希存储，杜绝明文泄漏）
 # ---------------------------------------------------------------------------
