@@ -89,7 +89,9 @@ desktop/assets/*.png
 !scripts/build_desktop.py
 !tests/
 tests/*
-!tests/test_desktop.py
+# 测试文件一律入库（历史上只有 test_desktop.py 被豁免，其余全靠 git add -f
+# 逐个救回——P2 起测试文件成为常规交付物，直接豁免 test_*.py）
+!tests/test_*.py
 
 
 # ===== 逆向提取的密钥与解密产物（绝不能上传） =====

@@ -2,10 +2,11 @@
 import base64
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from admin.audit import current_actor, log_request
 from admin.db import get_db
 from admin.models import ApiKey, ModelGroup
 from admin.security import hash_key, require_admin
@@ -75,7 +76,8 @@ def _validate_group(db: Session, group_id: int) -> int:
 
 
 @router.post("")
-def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+               request: Request = None):
     raw = _gen_key()
     gid = _validate_group(db, body.group_id)
     k = ApiKey(
@@ -91,6 +93,10 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
     db.add(k)
     db.commit()
     db.refresh(k)
+    # 审计：key 创建成功（明文只写进响应，绝不落审计日志）
+    log_request(current_actor(), "create_key", target=f"{k.id}:{k.name}",
+                detail=f"limit={body.credit_limit},unlimited={bool(k.unlimited)}",
+                request=request)
     # 明文 key 仅此返回一次
     return {
         "id": k.id,
@@ -104,7 +110,8 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
 
 
 @router.get("/{key_id}/view")
-def view_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def view_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+             request: Request = None):
     """查看 Key 完整值（创建后可再次查看）。"""
     k = db.query(ApiKey).filter(ApiKey.id == key_id).first()
     if not k:
@@ -112,6 +119,10 @@ def view_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depend
     raw = _decode_key(k.key_full)
     if not raw:
         raise HTTPException(status_code=410, detail="该 Key 创建于「查看功能」上线前，完整值未存储。建议重新生成一个新 Key。")
+    # 审计：查看完整 key 是最高危操作（拿到明文等于拿到配额），必须留痕。
+    # detail 只写 name/前缀，绝不写明文。
+    log_request(current_actor(), "view_key_full", target=f"{k.id}:{k.name}",
+                detail=f"prefix={k.key_prefix}", request=request)
     return {
         "id": k.id,
         "name": k.name,
@@ -142,7 +153,8 @@ def key_usage(key_id: int, _: bool = Depends(require_admin), db: Session = Depen
 
 
 @router.patch("/{key_id}")
-def patch_key(key_id: int, body: dict, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def patch_key(key_id: int, body: dict, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+              request: Request = None):
     k = db.query(ApiKey).filter(ApiKey.id == key_id).first()
     if not k:
         raise HTTPException(status_code=404, detail="Key 不存在")
@@ -161,14 +173,20 @@ def patch_key(key_id: int, body: dict, _: bool = Depends(require_admin), db: Ses
     if body.get("reset_used"):
         k.credit_used = 0
     db.commit()
+    # 审计：detail 只记改了哪些**字段名**，不写值（值可能含 key 相关明文）
+    log_request(current_actor(), "update_key", target=f"{k.id}:{k.name}",
+                detail=",".join(sorted(body.keys())), request=request)
     return {"id": k.id, "ok": True}
 
 
 @router.delete("/{key_id}")
-def delete_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def delete_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+               request: Request = None):
     k = db.query(ApiKey).filter(ApiKey.id == key_id).first()
     if not k:
         raise HTTPException(status_code=404, detail="Key 不存在")
+    log_request(current_actor(), "delete_key", target=f"{k.id}:{k.name}",
+                detail=f"prefix={k.key_prefix}", request=request)
     db.delete(k)
     db.commit()
     return {"id": key_id, "ok": True}

@@ -7,13 +7,14 @@ from datetime import datetime, timezone, timedelta
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from admin import backend, jobrunner, realm as realm_mod, wb_login
 from admin import wb_crypto
+from admin.audit import current_actor, log_request
 from admin.config import settings
 from admin.db import SessionLocal, get_db
 from admin.models import Account, AccountModelCooldown, ModelConfig, UsageLog
@@ -610,7 +611,8 @@ def clear_model_limit(acc_id: int, body: ClearModelLimit,
 
 
 @router.post("")
-def add_account(body: AccountIn, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def add_account(body: AccountIn, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+                request: Request = None):
     # 第一道：只收「auth 之后的授权 JSON」，非凭证一律 400
     _reject_non_credential(body.auth_json)
     # 第二道：**真调上游**确认凭证可用、非伪造，并取回真实账号信息 + 余额
@@ -626,6 +628,8 @@ def add_account(body: AccountIn, _: bool = Depends(require_admin), db: Session =
         _apply_meta(dup, body.auth_json, profile=profile, balance=balance)
         db.commit()
         _post_login_automation(dup.id, dup.name or dup.uid)
+        log_request(current_actor(), "create_account", target=f"{dup.id}:{dup.name}",
+                    detail=f"uid={dup.uid},duplicated=True(covered)", request=request)
         return {"id": dup.id, "name": dup.name, "ok": True,
                 "duplicated": True,
                 "message": f"该账号已存在（id={dup.id}），已用新凭证覆盖更新"}
@@ -637,12 +641,15 @@ def add_account(body: AccountIn, _: bool = Depends(require_admin), db: Session =
     _refresh_balance(acc)
     db.commit()
     _post_login_automation(acc.id, acc.name or acc.uid)
+    log_request(current_actor(), "create_account", target=f"{acc.id}:{acc.name}",
+                detail=f"uid={acc.uid}", request=request)
     return {"id": acc.id, "name": acc.name, "ok": True, "duplicated": False,
             "verified": True, "balance_remain": acc.balance_remain}
 
 
 @router.post("/batch")
-def batch_add(body: AccountBatchIn, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def batch_add(body: AccountBatchIn, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+              request: Request = None):
     """批量上传：逐条做**结构校验 + 真实上游验证**，不合格的记进 errors 并跳过。
 
     `verify` 默认为 True。批量上传时如果每条都真调上游会慢（每条 1-2 次请求），
@@ -701,6 +708,9 @@ def batch_add(body: AccountBatchIn, _: bool = Depends(require_admin), db: Sessio
             # 瞬时网络问题 —— 记为警告而不是拒绝，凭证本身是可信的。
             errors.append(f"账号 {acc.id} 余额刷新失败（凭据可能失效，请稍后刷新）")
         db.commit()
+    log_request(current_actor(), "batch_upload", target="accounts",
+                detail=f"added={added},skipped={skipped},errors={len(errors)}",
+                request=request)
     return {"added": added, "skipped": skipped, "errors": errors}
 
 
@@ -814,7 +824,8 @@ def scan_local(_: bool = Depends(require_admin)):
 
 
 @router.post("/import-local")
-def import_local(body: ImportLocalIn, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def import_local(body: ImportLocalIn, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+                 request: Request = None):
     """把本机登录态目录里的 .info 直接读入号池（服务端读取，不向前端暴露 token）。"""
     d = _client_auth_dir()
     if not os.path.isdir(d):
@@ -867,6 +878,9 @@ def import_local(body: ImportLocalIn, _: bool = Depends(require_admin), db: Sess
         else:
             errors.append(f"账号 {acc.id}({acc.name}) 余额刷新失败（稍后可手动刷新）")
         db.commit()
+    log_request(current_actor(), "import_local", target="accounts",
+                detail=f"added={added},skipped={skipped},errors={len(errors)}",
+                request=request)
     return {"added": added, "skipped": skipped, "errors": errors}
 
 
@@ -899,7 +913,8 @@ def export_one_account(
 
 
 @router.post("/{acc_id}/inject")
-def inject_to_client(acc_id: int, body: InjectIn, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def inject_to_client(acc_id: int, body: InjectIn, _: bool = Depends(require_admin),
+                     db: Session = Depends(get_db), request: Request = None):
     """把号池里某账号的 .info 注入到本机客户端的活动登录文件（先备份当前登录态）。"""
     acc = db.query(Account).filter(Account.id == acc_id).first()
     if not acc:
@@ -917,6 +932,8 @@ def inject_to_client(acc_id: int, body: InjectIn, _: bool = Depends(require_admi
         shutil.copy2(target, backup)
     with open(target, "w", encoding="utf-8") as f:
         f.write(acc.auth_json)
+    log_request(current_actor(), "inject_local", target=f"{acc.id}:{acc.name}",
+                detail=f"uid={acc.uid}", request=request)
     return {"ok": True, "target": target, "backup": backup, "account": acc.name, "uid": acc.uid}
 
 
@@ -1402,6 +1419,7 @@ def patch_account(
     body: dict,
     _: bool = Depends(require_admin),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
     acc = db.query(Account).filter(Account.id == acc_id).first()
     if not acc:
@@ -1411,14 +1429,27 @@ def patch_account(
     if "status" in body and body["status"] in ("active", "disabled"):
         acc.status = body["status"]
     db.commit()
+    # 审计：改状态的短码按方向分开（enable/disable 是两个语义）；
+    # 其余字段变更归入 update_account 一条。
+    if "status" in body and body["status"] in ("active", "disabled"):
+        log_request(current_actor(),
+                    "enable_account" if body["status"] == "active" else "disable_account",
+                    target=f"{acc.id}:{acc.name}", detail=f"uid={acc.uid}",
+                    request=request)
+    elif body:
+        log_request(current_actor(), "update_account", target=f"{acc.id}:{acc.name}",
+                    detail=",".join(sorted(body.keys())), request=request)
     return {"id": acc.id, "ok": True}
 
 
 @router.delete("/{acc_id}")
-def delete_account(acc_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def delete_account(acc_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db),
+                   request: Request = None):
     acc = db.query(Account).filter(Account.id == acc_id).first()
     if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
+    log_request(current_actor(), "delete_account", target=f"{acc.id}:{acc.name}",
+                detail=f"uid={acc.uid}", request=request)
     db.query(AccountModelCooldown).filter(AccountModelCooldown.account_id == acc_id).delete(synchronize_session=False)
     db.delete(acc)
     db.commit()
