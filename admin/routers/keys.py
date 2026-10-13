@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from admin.audit import current_actor, log_request
 from admin.db import get_db
 from admin.models import AccountGroup, ApiKey, ApiKeyIp, ModelGroup
-from admin.security import hash_key, key_ip_allowlist, require_admin, _norm_cidrs
+from admin.security import hash_key, key_ip_allowlist, require_admin, _norm_cidrs, require_admin_read
 
 router = APIRouter(prefix="/api/keys", tags=["keys"])
 
@@ -84,7 +84,7 @@ def _decode_key(encoded: str) -> str:
 
 
 @router.get("")
-def list_keys(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def list_keys(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     rows = db.query(ApiKey).order_by(ApiKey.id.desc()).all()
     group_names = {g.id: g.name for g in db.query(ModelGroup).all()}
     acc_group_names = {g.id: g.name for g in db.query(AccountGroup).all()}
@@ -200,7 +200,7 @@ def view_key(key_id: int, _: bool = Depends(require_admin), db: Session = Depend
 
 
 @router.get("/{key_id}/usage")
-def key_usage(key_id: int, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def key_usage(key_id: int, _: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     """查看 Key 的积分额度消耗情况。"""
     k = db.query(ApiKey).filter(ApiKey.id == key_id).first()
     if not k:

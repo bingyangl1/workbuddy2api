@@ -18,7 +18,7 @@ from admin import backend
 from admin.config import settings
 from admin.db import get_db
 from admin.models import Account, ModelConfig
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -62,7 +62,7 @@ def _is_model_allowed(db: Session, model_id: str) -> bool:
 @router.get("/configs")
 def list_configs(
     level: Optional[str] = None,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """列出所有模型配置。"""
@@ -89,7 +89,7 @@ def list_configs(
 
 
 @router.get("/busy")
-def model_busy(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def model_busy(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     """Upstream capacity is independent of local enablement and cooldowns."""
     from admin.model_busy import get_busy_levels, LABELS
     models = [row.model_id for row in db.query(ModelConfig.model_id).distinct().all()]

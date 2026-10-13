@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from admin.audit import current_actor, log_request
 from admin.db import get_db
 from admin.models import Account, AccountGroup, ApiKey
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/account-groups", tags=["account-groups"])
 
@@ -26,7 +26,7 @@ class GroupIn(BaseModel):
 
 
 @router.get("")
-def list_groups(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def list_groups(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     rows = db.query(AccountGroup).order_by(AccountGroup.id).all()
     items = []
     for g in rows:

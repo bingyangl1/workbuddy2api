@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from admin.db import get_db
 from admin.models import Account, ApiKey, UsageLog
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -178,7 +178,7 @@ def list_logs(
     end: Optional[str] = None,
     before_id: Optional[int] = None,  # keyset 分页游标（深翻页用，比 OFFSET 快）
     with_total: bool = True,          # 深翻页时可关掉总数统计省一次扫描
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """用量日志列表（服务端分页 + 过滤）。
@@ -255,7 +255,7 @@ def export_logs(
     start: Optional[str] = None,
     end: Optional[str] = None,
     limit: int = 50000,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """导出用量日志为 CSV（UTF-8 BOM，Excel 直接可打开）。
@@ -322,7 +322,7 @@ def export_logs(
 @router.get("/accounts")
 def log_accounts(
     days: int = 30,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """「按账号查询」用的下拉选项：**窗口内真实产生过请求**的账号。
@@ -383,7 +383,7 @@ def log_summary(
     account_id: Optional[int] = None,
     key_id: Optional[int] = None,
     model: Optional[str] = None,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """**按账号**的用量汇总（与列表共用同一套筛选口径）。

@@ -15,7 +15,7 @@ from admin import iputil
 from admin.audit import current_actor, log_request
 from admin.db import get_db
 from admin.models import IpAccessLog, IpRule, SystemSetting
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/security", tags=["security"])
 
@@ -55,7 +55,7 @@ def _set_config(db: Session, cfg: dict) -> None:
 
 
 @router.get("/config")
-def read_config(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def read_config(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     return get_config(db)
 
 
@@ -71,7 +71,7 @@ def write_config(body: ConfigIn, request: Request,
 
 
 @router.get("/rules")
-def list_rules(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def list_rules(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     rows = db.query(IpRule).order_by(IpRule.id.desc()).all()
     return {"items": [
         {"id": r.id, "kind": r.kind, "cidr": r.cidr, "note": r.note,
@@ -113,7 +113,7 @@ def delete_rule(rule_id: int, request: Request,
 
 
 @router.get("/logs")
-def access_logs(limit: int = 200, _: bool = Depends(require_admin),
+def access_logs(limit: int = 200, _: bool = Depends(require_admin_read),
                 db: Session = Depends(get_db)):
     rows = (db.query(IpAccessLog).order_by(IpAccessLog.id.desc())
             .limit(min(1000, max(1, limit))).all())
@@ -150,7 +150,7 @@ def _get_model_map(db: Session) -> dict:
 
 
 @router.get("/model-map")
-def read_model_map(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def read_model_map(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     return {"map": _get_model_map(db)}
 
 

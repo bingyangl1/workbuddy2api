@@ -332,11 +332,12 @@ class TestKeysRouterCrud(unittest.TestCase):
                 db.close()
         from admin.routers import keys as keys_mod
         from admin.db import get_db
-        from admin.security import require_admin
+        from admin.security import require_admin, require_admin_read
 
         app = FastAPI()
         app.include_router(keys_mod.router)
         app.dependency_overrides[require_admin] = lambda: True
+        app.dependency_overrides[require_admin_read] = lambda: True
         app.dependency_overrides[get_db] = _db
         # 审计走旁路容错，但 SessionLocal 指向真 MySQL 会慢——mock 掉
         self._audit_patch = mock.patch("admin.audit.SessionLocal", self.factory)

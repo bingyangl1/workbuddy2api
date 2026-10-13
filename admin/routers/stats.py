@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from admin.db import get_db
 from admin.models import ApiKey, UsageLog
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
@@ -27,7 +27,7 @@ _OK_KINDS = ("", "success")
 
 @router.get("/model-health")
 def model_health_stats(hours: int = Query(default=24, ge=1, le=168),
-                       _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+                       _: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     from admin.health import model_health
     return model_health(db, hours)
 
@@ -49,7 +49,7 @@ def usage_stats(
     model: Optional[str] = None,
     account_id: Optional[int] = None,
     use_case: Optional[str] = None,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """使用记录总览：概览卡片 + 模型分布 + 分组分布 + 端点分布 + 趋势。
@@ -222,7 +222,7 @@ def usage_stats(
 @router.get("/usage/options")
 def usage_filter_options(
     days: int = 30,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """筛选下拉的可选项：实际用过的 Key / 模型 / 端点。

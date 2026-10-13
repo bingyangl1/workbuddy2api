@@ -18,7 +18,7 @@ from admin.audit import current_actor, log_request
 from admin.config import settings
 from admin.db import SessionLocal, get_db
 from admin.models import Account, AccountModelCooldown, ModelConfig, UsageLog
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -453,7 +453,7 @@ def _credit_fields(a: Account) -> dict:
 
 
 @router.get("")
-def list_accounts(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def list_accounts(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     rows = db.query(Account).order_by(Account.id.desc()).all()
     now = datetime.utcnow()
     limits = _active_model_limits(db, now)
@@ -557,7 +557,7 @@ def _active_model_limits(db: Session, now: datetime) -> dict:
 
 
 @router.get("/model-limits")
-def model_limits(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def model_limits(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     """Observed account/model limits + gateway usage; no upstream polling."""
     now = datetime.utcnow()
     rows = db.query(Account).all()
@@ -716,7 +716,7 @@ def batch_add(body: AccountBatchIn, _: bool = Depends(require_admin), db: Sessio
 
 
 @router.get("/duplicates")
-def list_duplicates(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def list_duplicates(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     """列出 uid 重复的账号组（每组保留一条，其余是可清理的冗余）。"""
     rows = db.query(Account).order_by(Account.id.asc()).all()
     groups: dict[str, list[Account]] = {}
@@ -965,7 +965,7 @@ def refresh_account(acc_id: int, with_expiry: bool = True,
 
 @router.get("/{acc_id}/credit-details")
 def credit_details(acc_id: int, refresh: bool = False,
-                   _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+                   _: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     """获取账号积分明细（每个积分包的总量/剩余/到期时间）。
 
     默认**优先返回库内快照**：整点定时任务已经把逐包明细存下来了，
@@ -1202,7 +1202,7 @@ def request_usage(
     end_time: str = "",
     page_num: int = 1,
     page_size: int = 10,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """获取账号模型请求用量（对接 WorkBuddy 已有接口，不自建日志）。"""

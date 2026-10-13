@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from admin import credits as credit_rules
 from admin.db import get_db
 from admin.models import Account, UsageLog
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/credits", tags=["credits"])
 
@@ -129,7 +129,7 @@ def credit_expiry_stats(
     include_disabled: bool = False,
     package_limit: int = 60,
     package_offset: int = 0,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """积分到期总览：**按紧迫度排序**的账号列表 + 最近到期的积分包。
@@ -261,7 +261,7 @@ def credit_usage_stats(
     days: int = 7,
     account_id: Optional[int] = None,
     top: int = 20,
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """积分消耗构成：按账号 / 按模型的消耗排行（数据源 usage_logs）。

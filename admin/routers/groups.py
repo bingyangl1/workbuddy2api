@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from admin.db import get_db
 from admin.models import ApiKey, ModelConfig, ModelGroup, ModelGroupItem
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
@@ -74,7 +74,7 @@ def group_model_map(db: Session) -> dict[int, set[str]]:
 
 
 @router.get("")
-def list_groups(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+def list_groups(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
     """分组列表，附带模型数与绑定的 Key 数。"""
     groups = db.query(ModelGroup).order_by(ModelGroup.id.desc()).all()
     key_counts: dict[int, int] = {}

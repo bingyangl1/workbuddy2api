@@ -150,12 +150,13 @@ class TestAuditRouter(AuditTestCase):
 
     def _client(self):
         from admin.routers import audit as audit_router
-        from admin.security import require_admin
+        from admin.security import require_admin, require_admin_read
         from admin.db import get_db
 
         app = FastAPI()
         app.include_router(audit_router.router)
         app.dependency_overrides[require_admin] = lambda: True
+        app.dependency_overrides[require_admin_read] = lambda: True
         # 路由的 get_db 也指向测试工厂：与 admin.audit.SessionLocal 同一个内存库。
         # 必须保持生成器形态（原 get_db 是 yield 依赖，直接给 factory 会 422）。
         def _test_get_db():

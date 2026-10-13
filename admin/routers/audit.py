@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from admin.audit import current_actor, log_request
 from admin.db import get_db
 from admin.models import AuditLog
-from admin.security import require_admin
+from admin.security import require_admin, require_admin_read
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -23,7 +23,7 @@ def list_audit(
     limit: int = 200,
     offset: int = 0,
     action: str = "",
-    _: bool = Depends(require_admin),
+    _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
     """按 id 倒序列审计日志；action 可选过滤。"""

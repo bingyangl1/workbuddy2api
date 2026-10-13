@@ -72,11 +72,12 @@ class ModelMapRouterCase(unittest.TestCase):
 
         from admin.routers import security as sec_mod
         from admin.db import get_db
-        from admin.security import require_admin
+        from admin.security import require_admin, require_admin_read
 
         app = FastAPI()
         app.include_router(sec_mod.router)
         app.dependency_overrides[require_admin] = lambda: True
+        app.dependency_overrides[require_admin_read] = lambda: True
         app.dependency_overrides[get_db] = _db
         self._audit_patch = mock.patch("admin.audit.SessionLocal", self.factory)
         self._audit_patch.start()
