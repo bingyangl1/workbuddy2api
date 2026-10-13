@@ -13,12 +13,47 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from admin import backend, jobrunner, realm as realm_mod, wb_login
+from admin import wb_crypto
 from admin.config import settings
 from admin.db import SessionLocal, get_db
 from admin.models import Account, AccountModelCooldown, ModelConfig, UsageLog
 from admin.security import require_admin
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
+
+
+def _atrest_secret() -> str | None:
+    """取本机 at-rest 密钥：env 优先，其次仓库根的提取产物文件。"""
+    secret = os.environ.get("WORKBUDDY_ATREST_SECRET", "").strip()
+    if secret:
+        return secret
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for name in ("_atrest_secret.json", "_extracted_keys.json"):
+        p = os.path.join(here, name)
+        if os.path.exists(p):
+            try:
+                return wb_crypto.load_secret_key(p)
+            except Exception:
+                continue
+    return None
+
+
+def _decrypt_info_if_needed(data: dict) -> dict:
+    """新版客户端 .info 的敏感字段是 $wbEncrypted 信封；有密钥则解密。
+
+    无密钥或解密失败时原样返回（后续 validate_credential 会给出明确拒因）。
+    """
+    try:
+        if not wb_crypto.is_encrypted(
+                (data.get("auth") or {}).get("accessToken")):
+            return data
+        secret = _atrest_secret()
+        if not secret:
+            return data
+        protector, _ = wb_crypto.derive_protector_key(secret)
+        return wb_crypto.decrypt_info_payload(data, protector)
+    except Exception:
+        return data
 
 
 class AccountIn(BaseModel):
@@ -747,6 +782,7 @@ def scan_local(_: bool = Depends(require_admin)):
             data = json.load(open(f, encoding="utf-8"))
         except Exception:
             continue
+        data = _decrypt_info_if_needed(data)
         meta = backend.parse_auth_meta(json.dumps(data))
         uid = meta.get("uid") or ""
         # 同 uid 只保留一份（优先保留无时间戳后缀的"实时登录"文件）
@@ -799,10 +835,12 @@ def import_local(body: ImportLocalIn, _: bool = Depends(require_admin), db: Sess
             errors.append(f"文件不存在: {name}")
             continue
         try:
-            auth = open(path, encoding="utf-8").read()
+            data = json.load(open(path, encoding="utf-8"))
         except Exception:
             errors.append(f"{name}: 读取失败")
             continue
+        data = _decrypt_info_if_needed(data)
+        auth = json.dumps(data)
         # 目录里的 *.info 未必都是凭证（可能有半截文件 / 别的 JSON），
         # 与上传入口用同一个校验器把关，避免把垃圾读进号池。
         chk = wb_login.validate_credential(auth)
