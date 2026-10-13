@@ -3850,3 +3850,75 @@ def models(
                               "type": "upstream"}})
             # 双域模式：某一 realm 拉取失败不阻塞另一 realm 的列表。
     return {"object": "list", "data": data, "source": "backend"}
+
+
+@router.get("/v1/usage")
+def key_usage(
+    request: Request,
+    db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None),
+):
+    """密钥自查：已用/上限/剩余（双配额各一组）、有效期、模型范围、realm。
+
+    参考 manager gateway.key_usage（MIT）。**只认 Key 存在**——耗尽/过期/停用
+    照样可查：在调不动的时候，用户最需要看到「还剩多少、为什么调不动」，
+    密钥本身已证明归属，这里只暴露它自己的元数据，不是再甩一个 401/402。
+
+    零上游调用：所有数字都是面板**已记录**的值（data_source=panel-recorded），
+    读取时刻即 snapshot_at。监控脚本可以每分钟轮询而不消耗任何配额。
+    """
+    api_key = x_api_key
+    if not api_key and authorization and authorization.startswith("Bearer "):
+        api_key = authorization[7:].strip()
+    if not api_key:
+        return JSONResponse(status_code=401, content={
+            "error": {"message": "缺少 API Key，请在 Authorization 头中提供 Bearer 令牌",
+                      "type": "auth_error", "code": "missing_api_key"}})
+    key = get_key_row(db, api_key)
+    if not key:
+        return JSONResponse(status_code=401, content={
+            "error": {"message": "API Key 无效", "type": "auth_error", "code": "invalid_api_key"}})
+
+    def allowance(limit: float | int | None, used: float | int | None,
+                  unlimited: bool = False) -> dict:
+        used_n = used or 0
+        if unlimited:
+            return {"used": used_n, "limit": None, "remaining": None}
+        limit_n = limit or 0
+        return {
+            "used": round(used_n, 2) if isinstance(used_n, float) else used_n,
+            "limit": limit_n or None,           # None = 不限制
+            "remaining": max(0, round(limit_n - used_n, 2)) if limit_n else None,
+        }
+
+    # 记一行 0-token UsageLog（与 manager 同口径）：监控脚本每分钟轮询时，
+    # 运维在「使用记录」里完全看不出流量从哪来。这一行顺带把 last_used_at
+    # 与来源 IP 留痕（touch_key 不带 tokens）；积分/token 消耗**一分不记**。
+    touch_key(key.id, _client_ip(request), tokens=0)
+    try:
+        db.add(UsageLog(api_key_id=key.id, account_id=0, model="", credits=0.0,
+                        client_ip=_client_ip(request), use_case="key-usage",
+                        error_kind=""))
+        db.commit()
+    except Exception:
+        db.rollback()  # 旁路：日志失败不影响自查
+
+    expired = bool(key.expires_at and key.expires_at < datetime.utcnow())
+    return {
+        "object": "key.usage",
+        "key": {
+            "name": key.name or "",
+            "prefix": key.key_prefix or "",
+            "realm": (key.realm or ""),
+            "enabled": key.status == "active",
+            "expires_at": key.expires_at.isoformat() if key.expires_at else None,
+            "expired": expired,
+            "models": sorted(_key_group_models(db, key)) if _key_group_models(db, key) is not None else [],
+        },
+        "tokens": allowance(key.token_quota, key.used_tokens),
+        "credits": allowance(key.credit_limit, key.credit_used, unlimited=bool(key.unlimited)),
+        "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
+        "snapshot_at": datetime.utcnow().isoformat(),
+        "data_source": "panel-recorded",
+    }
