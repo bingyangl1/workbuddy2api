@@ -145,6 +145,8 @@ def _serialize(rows, key_names: dict, acc_names: dict) -> list[dict]:
             "key_name": key_names.get(r.api_key_id) or f"#{r.api_key_id}",
             "account_name": acc_names.get(r.account_id) or f"#{r.account_id}",
             "model": r.model,
+            # P2 T6：原始请求模型名（别名命中时与 model 不同，对账用）
+            "requested_model": getattr(r, "requested_model", "") or "",
             "credits": r.credits,
             "prompt_tokens": r.prompt_tokens,
             "completion_tokens": r.completion_tokens,

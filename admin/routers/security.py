@@ -133,3 +133,50 @@ def clear_logs(request: Request, _: bool = Depends(require_admin),
     log_request(current_actor(), "clear_ip_access_logs", target="ip_access_logs",
                 request=request)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# P2 T6：模型别名映射（model_map：别名 → 真名；网关侧见 proxy._map_model）
+# ---------------------------------------------------------------------------
+
+def _get_model_map(db: Session) -> dict:
+    import json
+    row = db.query(SystemSetting).filter(SystemSetting.key == "model_map").first()
+    try:
+        m = json.loads(row.value) if row and row.value else {}
+    except Exception:
+        m = {}
+    return m if isinstance(m, dict) else {}
+
+
+@router.get("/model-map")
+def read_model_map(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    return {"map": _get_model_map(db)}
+
+
+@router.post("/model-map")
+def write_model_map(body: dict, request: Request,
+                    _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """整体覆盖。清理：空键/空值剔除；值必须是字符串（防写入坏数据让
+    网关 _map_model 拿到非 dict——虽然网关侧有兜底，写入侧也该拦）。"""
+    import json
+    raw = body.get("map", body) if isinstance(body, dict) else {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="map 必须是对象")
+    clean = {}
+    for k, v in raw.items():
+        ks, vs = str(k).strip(), str(v).strip()
+        if not ks or not vs:
+            continue
+        if ks == vs:
+            continue  # 自映射无意义，拒掉免得误以为「映射生效了」
+        clean[ks] = vs
+    row = db.query(SystemSetting).filter(SystemSetting.key == "model_map").first()
+    if row is None:
+        row = SystemSetting(key="model_map", value="")
+        db.add(row)
+    row.value = json.dumps(clean, ensure_ascii=False)
+    db.commit()
+    log_request(current_actor(), "update_model_map", target="model_map",
+                detail=f"{len(clean)} 条映射", request=request)
+    return {"map": clean}

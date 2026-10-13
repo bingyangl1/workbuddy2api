@@ -291,6 +291,30 @@ def _reject(rej) -> JSONResponse:
     )
 
 
+# ---------------------------------------------------------------------------
+# P2 T6：模型别名映射（system_settings.model_map：别名 → 真名）
+# ---------------------------------------------------------------------------
+
+def _model_map(db: Session) -> dict:
+    """读取模型映射表；坏数据按「没有映射」处理（不能让网关 5xx，manager 同原则）。"""
+    from admin.models import SystemSetting
+    try:
+        row = db.query(SystemSetting).filter(SystemSetting.key == "model_map").first()
+        if not row or not row.value:
+            return {}
+        m = json.loads(row.value)
+        return m if isinstance(m, dict) else {}
+    except Exception:
+        return {}
+
+
+def _map_model(db: Session, model: str | None) -> str | None:
+    """别名 → 真名；没有映射时原样返回。"""
+    if not model:
+        return model
+    return _model_map(db).get(model, model)
+
+
 def _gate_key(db: Session, request: Request, key: ApiKey, model: str | None,
               *, is_model_list: bool = False, mapped_model: str | None = None) -> JSONResponse | None:
     """P2 T3 统一鉴权闸门：5 个 /v1 入口共用，替代原先只查配额的 check_quota。
@@ -491,7 +515,8 @@ def _record_usage(key_id: int, account_id: int, model: str, credits: float | Non
                   completion_tokens: int | None = None, total_tokens: int | None = None,
                   cached_tokens: int | None = None,
                   seq: int = 0, ttfb_ms: int | None = None,
-                  latency_ms: int | None = None, error_kind: str = "") -> int | None:
+                  latency_ms: int | None = None, error_kind: str = "",
+                  requested_model: str = "") -> int | None:
     """流式响应结束后独立开一个 DB 会话写入用量/额度。
 
     关键点：请求作用域的 db 会话在端点返回 StreamingResponse 时已被依赖 teardown 关闭，
@@ -538,6 +563,7 @@ def _record_usage(key_id: int, account_id: int, model: str, credits: float | Non
                     acc.auth_json = updated_auth_json
             log = UsageLog(
                 api_key_id=key_id, account_id=account_id, model=model, credits=credits,
+                requested_model=(requested_model or model or "")[:120],
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=total_tokens, cached_tokens=cached_tokens,
                 client_ip=client_ip or "", use_case=use_case or "",
@@ -2300,11 +2326,17 @@ async def chat_completions(
         return JSONResponse(status_code=400, content={"error": {"message": "bad json", "type": "invalid_request"}})
 
     model = payload.get("model", "auto")
+    requested_model = str(model or "")  # T6：原始请求名（UsageLog 对账用）
 
-    # P2 T3 统一闸门：停用/过期/双配额/IP 白名单/max_ips（realm 隔离在下方
-    # 前缀剥离后按既有 P1 块判定——判据是「剥离后的 realm 前缀」，与
-    # validate_key 第 7 步的「映射后模型名」是**不同对象**，两处各管各的）
-    gated = _gate_key(db, request, key, str(model or ""))
+    # ---- P2 T6 模型别名映射（在 realm 前缀剥离与模型白名单**之前**）----
+    # 别名 → 真名（可能带 cn:/global: 前缀）。issue #47：realm 与模型白名单
+    # 都必须判**映射后**的名字——真正路由的是映射目标，按别名判会让
+    # 「cn 限定密钥」通过别名调到 global 模型（隔离失效且无人察觉）。
+    model = _map_model(db, model)
+
+    # P2 T3 统一闸门：停用/过期/双配额/IP 白名单/max_ips。realm 判据传
+    # mapped_model（映射后名）；无前缀剥离时它就是 model 本身。
+    gated = _gate_key(db, request, key, str(model or ""), mapped_model=str(model or ""))
     if gated is not None:
         return gated
 
@@ -2691,7 +2723,7 @@ async def chat_completions(
                                           total_tokens=usage["total_tokens"],
                                           cached_tokens=usage["cached_tokens"],
                                           seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms,
-                                          error_kind="success")
+                                          error_kind="success", requested_model=requested_model)
                             # P2 T3：绑定来源 IP + 累计真实 token（credit 由 _record_usage
                             # 统一记，不重复）。仅成功路径——失败/截断不计入配额。
                             touch_key(key.id, _client_ip(request),
@@ -2821,8 +2853,15 @@ async def responses_proxy(
     except Exception:
         return JSONResponse(status_code=400, content={"error": {"message": "bad json", "type": "invalid_request"}})
 
+    requested_model = str(payload.get("model", "auto") or "")  # T6 原始名
+
+    # T6 别名映射（在 realm 前缀剥离/白名单之前，同 /v1/chat/completions）
+    mapped = _map_model(db, payload.get("model", "auto"))
+    if mapped != payload.get("model", "auto"):
+        payload["model"] = mapped
+
     # P2 T3 统一闸门（同 /v1/chat/completions）
-    gated = _gate_key(db, request, key, str(payload.get("model", "auto") or ""))
+    gated = _gate_key(db, request, key, str(mapped or ""), mapped_model=str(mapped or ""))
     if gated is not None:
         return gated
 
@@ -3197,7 +3236,7 @@ async def responses_proxy(
                                           total_tokens=usage["total_tokens"],
                                           cached_tokens=usage["cached_tokens"],
                                           seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms,
-                                          error_kind="success")
+                                          error_kind="success", requested_model=requested_model)
                             # P2 T3：同 chat 成功路径
                             touch_key(key.id, _client_ip(request),
                                       tokens=usage["total_tokens"] or 0)
@@ -3281,8 +3320,17 @@ async def anthropic_messages(
     except Exception:
         return JSONResponse(status_code=400, content={"error": {"message": "bad json", "type": "invalid_request"}})
 
+    requested_model = str(payload.get("model", "auto") or "")  # T6 原始名
+
+    # T6 别名映射（在档次映射/白名单之前，同 /v1/chat/completions）。
+    # 注意顺序：用户别名 → _map_anthropic_model 档次映射 → realm 前缀剥离，
+    # 下游所有判定（白名单、realm）看到的都是最终路由名（issue #47）。
+    mapped = _map_model(db, payload.get("model", "auto"))
+    if mapped != payload.get("model", "auto"):
+        payload["model"] = mapped
+
     # P2 T3 统一闸门（同 /v1/chat/completions）
-    gated = _gate_key(db, request, key, str(payload.get("model", "auto") or ""))
+    gated = _gate_key(db, request, key, str(mapped or ""), mapped_model=str(mapped or ""))
     if gated is not None:
         return gated
 
@@ -3688,7 +3736,7 @@ async def anthropic_messages(
                                           total_tokens=usage["total_tokens"],
                                           cached_tokens=usage["cached_tokens"],
                                           seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms,
-                                          error_kind="success")
+                                          error_kind="success", requested_model=requested_model)
                             # P2 T3：同 chat 成功路径
                             touch_key(key.id, _client_ip(request),
                                       tokens=usage["total_tokens"] or 0)

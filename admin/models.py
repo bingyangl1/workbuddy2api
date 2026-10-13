@@ -206,6 +206,10 @@ class UsageLog(Base):
     api_key_id = Column(Integer, nullable=False, default=0)
     account_id = Column(Integer, nullable=False, default=0)
     model = Column(String(120), default="")
+    # P2 T6：客户端**原始请求**的模型名（model_map 别名命中时与 model 不同：
+    # model 记实际路由的映射目标，这里留原始名便于「谁在按别名调」对账；
+    # 未命中映射时与 model 相同。manager request_logs.model/mapped_model 同构）
+    requested_model = Column(String(120), default="")
     credits = Column(Float, default=0)
     # 详细用量：优先取上游 usage 字段；缺省为 NULL
     prompt_tokens = Column(Integer, nullable=True, default=None)
