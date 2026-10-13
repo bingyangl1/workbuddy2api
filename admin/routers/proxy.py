@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from admin import backend, pool, model_limits
 from admin import client_profile as cprofile
+from admin import iputil
 from admin import realm as realm_mod
 from admin.config import settings
 from admin.db import SessionLocal, get_db
@@ -273,16 +274,13 @@ def _client_ip(request: Request) -> str:
     """提取发起请求的真实客户端 IP。
 
     经反向代理部署时，上游往往会带上 X-Forwarded-For / X-Real-IP；
-    取 XFF 首个（最原始客户端），否则 X-Real-IP，最后退回直连 socket 地址。
     这是「记录原客户端用户真实 IP」的关键，便于风控对账与上游用途日志对齐。
+
+    严格口径（信任代理模型，见 admin/iputil.py）：XFF / X-Real-IP 都是
+    客户端可伪造的普通请求头，仅当 **TCP 对端落在可信代理网段** 内才采信；
+    对端不可信（服务直接暴露时）→ 转发头一律无视，直接回 socket 地址。
     """
-    xff = request.headers.get("X-Forwarded-For")
-    if xff:
-        return xff.split(",")[0].strip()
-    real = request.headers.get("X-Real-IP")
-    if real:
-        return real.strip()
-    return request.client.host if request.client else ""
+    return iputil.client_ip(request)
 
 
 def _upstream_extra_headers(request: Request, purpose: str = "conversation",

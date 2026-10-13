@@ -38,8 +38,8 @@ from sqlalchemy.orm import Session
 from admin import wb_login
 from admin import realm as realm_mod
 from admin.db import get_db
+from admin import iputil
 from admin.models import Account
-from admin.ratelimit import get_client_ip
 from admin.security import require_admin
 
 _logger = logging.getLogger("admin.wb_login_router")
@@ -342,8 +342,9 @@ def login_start(_: bool = Depends(require_admin)):
 @router.post("/send")
 def login_send(body: SendIn, request: Request, _: bool = Depends(require_admin)):
     """第 2 步：给指定手机号发验证码。"""
-    ip = get_client_ip(request.headers.get("x-forwarded-for"), request.client.host
-                       if request.client else None)
+    # 发码节流按 IP 限频 → 必须用**严格口径**（iputil.client_ip：对端不在
+    # 可信代理网段时伪造的 XFF / X-Real-IP 一律无视，回 socket 地址）。
+    ip = iputil.client_ip(request)
     mobile = wb_login.normalize_mobile(body.mobile)
     _check_sms_quota(ip, mobile)
     try:
@@ -691,8 +692,9 @@ def join_send(body: JoinIn, request: Request):
         wb_login.validate_realm_match(sess.realm, body.realm)
     except wb_login.WbLoginError as e:
         raise _fail(e, 502)
-    ip = get_client_ip(request.headers.get("x-forwarded-for"),
-                       request.client.host if request.client else None)
+    # 同 login_send：公开端点的发码节流按 IP 限频，必须用**严格口径**
+    # （对端不可信 → 伪造 XFF/X-Real-IP 无效，回 socket，见 admin/iputil.py）。
+    ip = iputil.client_ip(request)
     mobile = wb_login.normalize_mobile(body.mobile)
     _check_sms_quota(ip, mobile)
     try:

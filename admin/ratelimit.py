@@ -3,6 +3,10 @@
 - 优先用 Redis（多进程/多实例共享计数）；连不上则退回进程内内存计数。
 - 支持反向代理：取 X-Forwarded-For 第一个 IP，否则取直连 IP。
 - 超出阈值后锁定一段时间，期间直接返回 429（带 Retry-After）。
+
+IP 口径说明：`get_client_ip` 是**宽松口径**（审计展示用），`get_trusted_client_ip`
+是**严格口径**（安全判定用，内部复刻 admin/iputil.py 的信任代理判定 —— 调用方
+传的是三个头值而非 Request，所以走 `iputil.trusted_ip_from_headers` 入口）。
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import time
 from threading import Lock
 from typing import Optional
 
+from admin import iputil
 from admin.config import settings
 
 try:
@@ -53,19 +58,13 @@ def get_trusted_client_ip(real_ip: Optional[str], forwarded_for: Optional[str],
     就能把登录失败计数摊到无限多个「IP」上，登录锁定形同虚设
     （安全审计第 6 条）。
 
-    可信来源按优先级取：
-      1. `X-Real-IP` —— nginx 用 `$remote_addr` **覆写**，不可伪造；
-      2. X-Forwarded-For 的**最后一段** —— `$proxy_add_x_forwarded_for`
-         追加进去的正是 nginx 看到的真实对端地址（离我们最近的一跳）；
-      3. 直连 socket 地址。
+    为什么这里不能直接用 `iputil.client_ip(request)`：调用方（server.py
+    登录锁定、login.py 发码节流）传的是三个头值字符串而非 Request 对象，
+    语义等价但入口不同 —— 所以委托给同为严格口径的
+    `iputil.trusted_ip_from_headers`（先判 direct_ip 是否可信代理，
+    可信才看 real_ip / XFF 末跳，不可信则伪造头一律无视）。
     """
-    if real_ip and real_ip.strip():
-        return real_ip.strip()
-    if forwarded_for:
-        parts = [p.strip() for p in forwarded_for.split(",") if p.strip()]
-        if parts:
-            return parts[-1]
-    return direct_ip or "unknown"
+    return iputil.trusted_ip_from_headers(real_ip, forwarded_for, direct_ip)
 
 
 def is_locked(ip: str) -> tuple[bool, int]:
