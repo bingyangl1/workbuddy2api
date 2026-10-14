@@ -517,3 +517,82 @@ export interface VersionInfo {
 export interface LoginResponse {
   token: string;
 }
+
+/* ── 成长计划（routers/growth.py）──────────────────────────────── */
+/** 任务定义（/tasks，分类后带 level/actionable） */
+export interface GrowthTask {
+  task_code: string;
+  title?: string;
+  accept_status?: string;         // not_accepted/in_progress/completed/claimed
+  progress?: {current?: number; target?: number};
+  reward_credit?: number;
+  reward_energy?: number;
+  level?: string;                 // 分级（auto/manual...）
+  level_label?: string;
+  actionable?: boolean;
+  reason?: string;
+}
+/** /tasks 响应（不绑账号，任务定义） */
+export interface GrowthTasksResponse {
+  tasks: GrowthTask[];
+  synced_at?: string;
+  source_account_id?: number;
+  cached?: boolean;
+  stale?: boolean;
+  error?: string;
+}
+/** /accounts/{id}/tasks 单账号任务完成情况（面板弹窗） */
+export interface GrowthAccountTasks {
+  account_id: number;
+  name: string;
+  tasks: GrowthTask[];
+  profile?: Record<string, unknown>;
+  summary: {
+    total: number;
+    done: number;
+    claimable: number;
+    claimable_credit: number;
+    actionable: number;
+  };
+  cached?: boolean;
+  stale?: boolean;
+  error?: string;
+}
+/** 策略表（/plans，分级依据） */
+export interface GrowthPlan {
+  task_code: string;
+  level: string;
+  level_label: string;
+  event_codes: string[];
+  reason: string;
+  actionable: boolean;
+}
+/** /run /run-async 批量结果（每账号） */
+export interface GrowthRunAccountResult {
+  account_id: number;
+  name?: string;
+  model?: string;
+  ok: boolean;
+  msg?: string;
+  tasks?: {task_code?: string; title?: string; level?: string; ok: boolean;
+           skipped?: string; fired?: number; times?: number; status?: string}[];
+  claimed?: {task_code: string; ok: boolean; credit?: number; energy?: number; msg?: string}[];
+  credit?: number;
+  energy?: number;
+  balance_total?: number;
+  balance_remain?: number;
+  noop?: boolean;
+  noop_reason?: string;
+}
+/** jobrunner 进度快照（/job/{id} 与 run-async 共用） */
+export interface GrowthJobSnapshot {
+  job_id: string;
+  status: string;                 // running/done/failed
+  title?: string;
+  phase?: string;
+  total?: number;
+  done?: number;
+  reused?: boolean;
+  result?: Record<string, unknown>;
+  error?: string;
+}

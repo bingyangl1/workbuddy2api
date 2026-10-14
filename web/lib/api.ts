@@ -17,6 +17,11 @@ import type {
   ApiToken,
   AuditLog,
   ClientProfile,
+  GrowthAccountTasks,
+  GrowthJobSnapshot,
+  GrowthPlan,
+  GrowthRunAccountResult,
+  GrowthTasksResponse,
   CreatedApiKey,
   CreatedApiToken,
   CreditDetails,
@@ -347,6 +352,23 @@ export const syncApi = {
 /* ── 系统（server.py + routers/releases.py）────────────────────── */
 export const systemApi = {
   version: () => get<VersionInfo>('/api/app/version'),
+};
+
+/* ── 成长计划（routers/growth.py）──────────────────────────────── */
+export const growthApi = {
+  tasks: (refresh = false) => get<GrowthTasksResponse>('/api/growth/tasks', {refresh}),
+  plans: () => get<{levels: Record<string, string>; plans: GrowthPlan[]}>('/api/growth/plans'),
+  accountTasks: (accountId: number, refresh = false) =>
+    get<GrowthAccountTasks>(`/api/growth/accounts/${accountId}/tasks`, {refresh}),
+  accept: (account_ids: number[], task_codes: string[]) =>
+    post<{results: unknown[]}>('/api/growth/accept', {account_ids, task_codes}),
+  run: (account_ids: number[] = [], task_codes: string[] | null = null) =>
+    post<{results: GrowthRunAccountResult[]; model: string}>('/api/growth/run', {account_ids, task_codes}),
+  runAsync: (account_ids: number[] = [], task_codes: string[] | null = null) =>
+    post<GrowthJobSnapshot>('/api/growth/run-async', {account_ids, task_codes}),
+  job: (jobId: string) => get<GrowthJobSnapshot>(`/api/growth/job/${jobId}`),
+  claim: (account_ids: number[], task_codes: string[] | null = null) =>
+    post<{results: GrowthRunAccountResult[]}>('/api/growth/claim', {account_ids, task_codes}),
 };
 
 export type {Account};
