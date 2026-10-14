@@ -1,4 +1,9 @@
 """管理后台 FastAPI 入口：登录、挂载路由、托管前端静态页、启动时建库建表。"""
+# 入口最早期钉死 stdout/stderr 为 UTF-8（Windows cp936 会在打印 emoji/非 GBK
+# 字符时崩掉整个进程，issue #147 同源）；须在 logging/print 之前。
+from admin.stdio_utf8 import force_utf8_stdio
+force_utf8_stdio()
+
 import logging
 from pathlib import Path
 

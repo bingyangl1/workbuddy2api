@@ -1,5 +1,21 @@
 # workbuddy2api
 
+> ## 关于本 fork
+>
+> 本仓库是 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的演进 fork，
+> 在保留上游「OpenAI/Anthropic 兼容反代 + 账号池自动化运营」全部能力的基础上，
+> 吸收了 [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager)（MIT）的运营优势。
+>
+> **本 fork 的新增主线**（详见 [PLAN 演进计划](PLAN-fork.md) 与 [CHANGELOG.md](CHANGELOG.md)）：
+>
+> - **国际版 realm 双域**：CN / Global（workbuddy.ai）端点分派、模型 `cn:`/`global:` 前缀路由、密钥版本隔离、任务按 realm 门控
+> - **密钥运营面**：每密钥全维度（有效期 / 最大 IP 数 / IP 白名单 / Token 配额）、`/v1/usage` 自查、入站 IP 治理、模型别名、只读管理 Token、操作审计、账号池分组隔离
+> - **面板现代化**：Next.js 15 静态导出 + shadcn/ui + 五语言 i18n（逐步替换旧 HTML 面板）
+>
+> **署名链（MIT）**：Sliverkiss/workbuddy2api → ithtelab/workbuddy-manager → linux-do/cdk（UI 设计令牌）。详见 [LICENSE](LICENSE) 的 Third-party notices。
+>
+> ---
+
 > 🎧 **本项目为纯 vibe coding 产物** —— 由 **DeepSeek** 模型与 **DSH** 智能体提供技术支持。
 >
 > - 模型：[DeepSeek 开放平台](https://platform.deepseek.com)

@@ -20,3 +20,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Third-party notices:
+
+- The modern admin panel (web/) and absorbed operational features adapt
+  ithtelab/workbuddy-manager (https://github.com/ithtelab/workbuddy-manager),
+  Copyright (c) 2026 WorkBuddy Manager contributors, MIT License.
+- UI design tokens, the shadcn/ui component layer, and the floating-dock
+  component are adapted from linux-do/cdk (https://github.com/linux-do/cdk),
+  Copyright (c) 2025 linux.do, MIT License.
+- Backend account-pool interaction lineage: Sliverkiss/workbuddy2api
+  (https://github.com/Sliverkiss/workbuddy2api), MIT License.

@@ -33,6 +33,12 @@ converter 已在 admin/server.py 中挂载到 /gw 前缀，因此无需再单独
 """
 from __future__ import annotations
 
+# 入口最早期钉死 stdout/stderr 为 UTF-8：Windows 中文区域默认 cp936，
+# 日志里一旦出现 emoji/非 GBK 字符（账号昵称 🏅 等）就会 UnicodeEncodeError
+# 让整个进程死在一句日志上（issue #147 同源）。必须在任何 print/日志之前。
+from admin.stdio_utf8 import force_utf8_stdio
+force_utf8_stdio()
+
 import argparse
 import os
 import signal
