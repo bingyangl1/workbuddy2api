@@ -1,5 +1,4 @@
 import type {Metadata} from 'next';
-import {Inter, Noto_Sans_SC} from 'next/font/google';
 import {Toaster} from '@/components/ui/sonner';
 import {ThemeProvider} from '@/components/common/layout/ThemeProvider';
 import {AuthProvider} from '@/lib/auth-context';
@@ -7,18 +6,9 @@ import {I18nProvider} from '@/lib/i18n/provider';
 import {withBasePath} from '@/lib/base-path';
 import './globals.css';
 
-const inter = Inter({
-  variable: '--font-inter',
-  subsets: ['latin'],
-  display: 'swap',
-});
-
-const notoSansSC = Noto_Sans_SC({
-  variable: '--font-noto-sans-sc',
-  subsets: ['latin'],
-  display: 'swap',
-  weight: ['300', '400', '500', '600', '700'],
-});
+// 字体走 globals.css 的系统字体栈（Inter/Noto Sans SC 若本机已装则用之，否则
+// 回退 system-ui/微软雅黑）。不用 next/font/google：Turbopack dev 下它要联网
+// 拉字体文件，离线/被墙时整站编译失败（build 用 webpack 不受影响，dev 会挂）。
 
 export const metadata: Metadata = {
   title: {
@@ -55,11 +45,11 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`${inter.variable} ${notoSansSC.variable} hide-scrollbar font-sans`}
+      className="hide-scrollbar font-sans"
       suppressHydrationWarning
     >
       <body
-        className={`${inter.variable} ${notoSansSC.variable} hide-scrollbar font-sans antialiased`}
+        className="hide-scrollbar font-sans antialiased"
       >
         <ThemeProvider
           attribute="class"
