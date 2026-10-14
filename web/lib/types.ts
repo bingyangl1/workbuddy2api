@@ -24,6 +24,13 @@ export interface Account {
   created_at: string | null;
   /** 该账号的模型级限流台账（model_limits 端点同源） */
   model_limits?: AccountModelLimit[];
+  /** 网关态（accounts 列表 _gateway_fields）：disabled/cooling/ready */
+  gateway_state?: 'disabled' | 'cooling' | 'ready';
+  gateway_until?: string | null;
+  /** 冷却/熔断/降权原因码（cool_kind/breaker/degraded） */
+  gateway_reason?: string;
+  /** 最近一次错误信息（停用/冷却的真实原因：401/403 被拒、限流等），人工判读封号风险用 */
+  last_err_msg?: string | null;
 }
 
 export interface AccountModelLimit {

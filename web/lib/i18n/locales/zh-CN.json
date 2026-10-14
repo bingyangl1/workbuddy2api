@@ -493,7 +493,10 @@
     "addDuplicated": "账号已存在，已用新凭证覆盖",
     "creditTitle": "积分明细 · {name}",
     "creditEmpty": "暂无积分包数据",
-    "creditRefresh": "重新采集"
+    "creditRefresh": "重新采集",
+    "stateCooling": "冷却中",
+    "stateRisk": "熔断/降权",
+    "stateModelLimited": "{n} 个模型限流"
   },
   "keys": {
     "title": "API 密钥",

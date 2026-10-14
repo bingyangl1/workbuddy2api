@@ -526,6 +526,9 @@ def _gateway_fields(a: Account, now: datetime) -> dict:
         "gateway_state": "disabled" if a.status != "active" else "cooling" if until else "ready",
         "gateway_until": until.isoformat() + "Z" if until else None,
         "gateway_reason": reason,
+        # 面板人工判读封号风险需要停用/冷却的真实原因（401/403 被拒、限流等）。
+        # 这本就是给人看的诊断串（_update_account_state 写入），脱敏无涉。
+        "last_err_msg": (a.last_err_msg or "")[:255] or None,
     }
 
 

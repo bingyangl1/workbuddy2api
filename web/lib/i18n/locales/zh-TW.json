@@ -493,7 +493,10 @@
     "addDuplicated": "帳號已存在，已用新憑證覆蓋",
     "creditTitle": "積分明細 · {name}",
     "creditEmpty": "暫無積分包資料",
-    "creditRefresh": "重新採集"
+    "creditRefresh": "重新採集",
+    "stateCooling": "冷卻中",
+    "stateRisk": "熔斷/降權",
+    "stateModelLimited": "{n} 個模型限流"
   },
   "keys": {
     "title": "API 金鑰",

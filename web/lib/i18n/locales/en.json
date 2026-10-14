@@ -517,7 +517,10 @@
     "addDuplicated": "Account exists; overwritten with new credential",
     "creditTitle": "Credit details · {name}",
     "creditEmpty": "No credit packages",
-    "creditRefresh": "Re-collect"
+    "creditRefresh": "Re-collect",
+    "stateCooling": "Cooling",
+    "stateRisk": "Breaker/Degraded",
+    "stateModelLimited": "{n} models limited"
   },
   "keys": {
     "title": "API keys",

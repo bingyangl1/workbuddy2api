@@ -493,7 +493,10 @@
     "addDuplicated": "기존 계정을 새 인증으로 덮어씀",
     "creditTitle": "크레딧 상세 · {name}",
     "creditEmpty": "크레딧 패키지 없음",
-    "creditRefresh": "다시 수집"
+    "creditRefresh": "다시 수집",
+    "stateCooling": "쿨다운 중",
+    "stateRisk": "브레이커/강등",
+    "stateModelLimited": "{n}개 모델 제한"
   },
   "keys": {
     "title": "API 키",

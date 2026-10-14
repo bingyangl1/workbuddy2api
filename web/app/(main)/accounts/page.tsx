@@ -50,7 +50,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import {Coins, Plus, RefreshCw, Search, ShieldCheck, Trash2} from 'lucide-react';
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {AlertTriangle, Coins, Flame, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2} from 'lucide-react';
 
 export default function AccountsPage() {
   const t = useT();
@@ -240,9 +243,7 @@ export default function AccountsPage() {
                     {a.balance_remain == null ? '—' : fmtNumber(a.balance_remain)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={a.status === 'active' ? 'default' : 'outline'}>
-                      {a.status === 'active' ? t('accounts.statusActive') : t('accounts.statusDisabled')}
-                    </Badge>
+                    <AccountStateBadges a={a} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {fmtIso(a.last_used_at)}
@@ -298,6 +299,73 @@ export default function AccountsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/* ── 账号状态徽章：把 cooling/breaker/degraded/限流显著标出，人工判读封号风险 ──
+ *
+ * 你刚被封过一个号——所以「账号当前是不是在异常状态」必须一眼可见，
+ * 而不是藏在 status=active 后面。本引擎网关的分层状态（_update_account_state）：
+ *   ready    → 正常（绿）
+ *   cooling  → 限流/瞬时故障冷却中（黄，多数可自愈，悬停看真实原因）
+ *   breaker  → 连败熔断（橙，持续坏，建议人工看一眼）
+ *   degraded → 连败降权（橙）
+ *   disabled → 已停用（红；401/403 被上游拒会立即到这，需重新登录）
+ * 另有模型级限流（model_limits）单独标。悬停统一显示 last_err_msg（真实原因）。 */
+function AccountStateBadges({a}: {a: Account}) {
+  const t = useT();
+  const reason = a.last_err_msg || '';
+  const tip = reason ? `${a.gateway_reason || a.gateway_state || ''}：${reason}` : undefined;
+
+  const badges: {key: string; label: string; cls: string; icon?: React.ReactNode}[] = [];
+  if (a.status !== 'active') {
+    badges.push({key: 'disabled', label: t('accounts.statusDisabled'),
+                 cls: 'border-red-300 bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400'});
+  } else {
+    switch (a.gateway_state) {
+      case 'cooling':
+        badges.push({key: 'cooling', label: t('accounts.stateCooling'),
+                     cls: 'border-amber-300 bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400',
+                     icon: <Timer className="h-3 w-3" />});
+        break;
+      case 'ready':
+      default:
+        badges.push({key: 'ready', label: t('accounts.statusActive'),
+                     cls: 'border-emerald-300 bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'});
+        break;
+    }
+    // breaker/degraded 与 cooling 可叠加（gateway_state 取最长那个），单独补标
+    if (a.gateway_reason === 'breaker' || a.gateway_reason === 'degraded') {
+      badges.push({key: 'risk', label: t('accounts.stateRisk'),
+                   cls: 'border-orange-300 bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400',
+                   icon: <Flame className="h-3 w-3" />});
+    }
+  }
+  if ((a.model_limits?.length ?? 0) > 0) {
+    badges.push({key: 'model', label: t('accounts.stateModelLimited', {n: a.model_limits!.length}),
+                 cls: 'border-violet-300 bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400',
+                 icon: <AlertTriangle className="h-3 w-3" />});
+  }
+
+  const body = (
+    <div className="flex flex-wrap items-center gap-1">
+      {badges.map((b) => (
+        <Badge key={b.key} variant="outline"
+               className={cn('gap-1 border font-normal', b.cls)}>
+          {b.icon}{b.label}
+        </Badge>
+      ))}
+    </div>
+  );
+
+  if (!tip) return body;
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{body}</TooltipTrigger>
+        <TooltipContent className="max-w-xs text-xs">{tip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

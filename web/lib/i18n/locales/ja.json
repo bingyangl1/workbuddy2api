@@ -493,7 +493,10 @@
     "addDuplicated": "既存アカウントを新しい認証で上書き",
     "creditTitle": "クレジット詳細 · {name}",
     "creditEmpty": "クレジットパッケージなし",
-    "creditRefresh": "再収集"
+    "creditRefresh": "再収集",
+    "stateCooling": "冷却中",
+    "stateRisk": "ブレーカー/降格",
+    "stateModelLimited": "{n} モデル制限"
   },
   "keys": {
     "title": "API キー",
