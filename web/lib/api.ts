@@ -32,6 +32,7 @@ import type {
   ModelHealth,
   ModelLimitRow,
   ScanLocalResult,
+  SpeedTestResult,
   Schedule,
   SecurityConfig,
   UsageLogPage,
@@ -215,18 +216,24 @@ export const modelApi = {
     get<{items: ModelConfig[]}>('/api/models/configs', level ? {level} : undefined),
   toggle: (id: number, enabled: boolean) =>
     patch<{id: number; model_id: string; enabled: boolean}>(`/api/models/${id}`, {enabled}),
-  batchToggle: (ids: number[], enabled: boolean) =>
-    post<{updated: number; enabled: boolean}>('/api/models/batch-toggle', {ids, enabled}),
+  // 契约：{model_ids: string[], enabled, level}（不是 ids:number[]）
+  batchToggle: (model_ids: string[], enabled: boolean, level = 'system') =>
+    post<{updated: number; enabled: boolean}>('/api/models/batch-toggle', {model_ids, enabled, level}),
   remove: (id: number) => del<{id: number; model_id: string; ok: boolean}>(`/api/models/${id}`),
-  sync: () => post<{ok: boolean; added: number}>('/api/models/sync'),
+  // 契约返回 {total_fetched, added, updated, total_in_db, enabled}
+  sync: () => post<{total_fetched: number; added: number; updated: number; total_in_db: number; enabled: number}>('/api/models/sync'),
   busy: () => get<ModelBusyResponse>('/api/models/busy'),
-  speedTest: () => post<{ok: boolean}>('/api/models/speed-test'),
-  // 模型分组
+  // 契约：{model, max_tokens?, messages?} → SpeedTestResult（真实上游请求，约 2-10s）
+  speedTest: (model: string, max_tokens = 256) =>
+    post<SpeedTestResult>('/api/models/speed-test', {model, max_tokens}),
+  // 模型分组（/api/groups，GroupIn = {name, note, models[]} 全量覆盖语义）
   groups: () => get<{items: ModelGroup[]}>('/api/groups'),
-  createGroup: (body: {name: string; models: string[]}) => post<ModelGroup>('/api/groups', body),
-  updateGroup: (id: number, body: {name?: string; models?: string[]}) =>
-    put<ModelGroup>(`/api/groups/${id}`, body),
-  deleteGroup: (id: number) => del<{ok: boolean}>(`/api/groups/${id}`),
+  createGroup: (body: {name: string; note?: string; models: string[]}) =>
+    post<{id: number; name: string; model_count: number; ok: boolean}>('/api/groups', body),
+  updateGroup: (id: number, body: {name: string; note?: string; models: string[]}) =>
+    put<{id: number; ok: boolean}>(`/api/groups/${id}`, body),
+  // 删除分组会把绑定的 Key group_id 置 0，返回 unbound_keys
+  deleteGroup: (id: number) => del<{id: number; ok: boolean; unbound_keys: number}>(`/api/groups/${id}`),
 };
 
 /* ── 账号池分组（routers/account_groups.py，P2 T8）──────────────── */

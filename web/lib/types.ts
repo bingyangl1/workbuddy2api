@@ -172,7 +172,7 @@ export interface ModelConfig {
   enabled: boolean;
   level: string;
   credit_multiplier: number;
-  credits_raw: number | null;
+  credits_raw: string;          // 引擎返回 "" 或 "x1.5" 等原始字符串
   is_free: boolean;
   note: string;
   created_at: string | null;
@@ -190,13 +190,29 @@ export interface ModelBusyResponse {
   stale: boolean;
 }
 
+/** routers/models.py::speed_test（测速：账号池直发上游一次流式请求） */
+export interface SpeedTestResult {
+  model: string;
+  account: string;              // nickname 或 uid（脱敏显示用）
+  ttft_ms: number | null;       // 首字延迟
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  gen_duration_ms: number;
+  total_duration_ms: number;
+  speed_tps: number | null;     // 生成速度 t/s
+  overall_tps: number | null;   // 端到端 t/s
+  sample: string;               // 输出样例（≤400 字）
+}
+
 /** routers/groups.py::list_groups（模型分组） */
 export interface ModelGroup {
   id: number;
   name: string;
+  note: string;
   models: string[];
-  model_count?: number;
-  bound_keys?: number;
+  model_count: number;
+  effective_count: number;      // 过滤掉已删除模型后的有效数
+  key_count: number;            // 绑定该组的 Key 数
   created_at: string | null;
 }
 
