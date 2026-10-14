@@ -1949,5 +1949,25 @@
     "autoCopyFailed": "Auto-copy failed",
     "autoCopyFailedDetail": "Go back and copy it manually — the key is shown only once",
     "alreadyWithKey": "You've already claimed — here's yours"
+  },
+  "audit": {
+    "title": "Audit Log",
+    "subtitle": "Sensitive admin operation trail",
+    "fAction": "Filter by action",
+    "allActions": "All actions",
+    "clear": "Clear audit",
+    "empty": "No audit records",
+    "colTime": "Time",
+    "colActor": "Actor",
+    "colAction": "Action",
+    "colTarget": "Target",
+    "colDetail": "Detail",
+    "colIp": "Source IP",
+    "pageInfo": "Records {from}–{to}",
+    "prev": "Prev",
+    "next": "Next",
+    "clearTitle": "Clear audit log",
+    "clearConfirm": "Clear all audit logs? This action itself leaves a clear_audit record.",
+    "cleared": "Audit log cleared"
   }
 }

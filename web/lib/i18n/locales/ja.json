@@ -1925,5 +1925,25 @@
     "autoCopyFailed": "自動コピーに失敗しました",
     "autoCopyFailedDetail": "前の画面に戻って手動でコピーしてください（平文は一度しか表示されません）",
     "alreadyWithKey": "すでに受け取り済みです（これがあなたの分です）"
+  },
+  "audit": {
+    "title": "監査ログ",
+    "subtitle": "管理画面の機微操作の記録",
+    "fAction": "アクションで絞り込み",
+    "allActions": "すべてのアクション",
+    "clear": "監査をクリア",
+    "empty": "監査レコードがありません",
+    "colTime": "時刻",
+    "colActor": "操作者",
+    "colAction": "アクション",
+    "colTarget": "対象",
+    "colDetail": "詳細",
+    "colIp": "送信元 IP",
+    "pageInfo": "{from}–{to} 件",
+    "prev": "前へ",
+    "next": "次へ",
+    "clearTitle": "監査ログをクリア",
+    "clearConfirm": "すべての監査ログをクリアしますか？この操作自体が clear_audit レコードを残します。",
+    "cleared": "監査ログをクリアしました"
   }
 }

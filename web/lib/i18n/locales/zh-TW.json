@@ -1925,5 +1925,25 @@
     "autoCopyFailed": "自動複製失敗",
     "autoCopyFailedDetail": "請回到上一步手動複製 —— 明文只顯示這一次",
     "alreadyWithKey": "你已經領過了，這是你的那份"
+  },
+  "audit": {
+    "title": "操作稽核",
+    "subtitle": "管理端敏感操作留痕",
+    "fAction": "按動作過濾",
+    "allActions": "全部動作",
+    "clear": "清空稽核",
+    "empty": "暫無稽核記錄",
+    "colTime": "時間",
+    "colActor": "操作者",
+    "colAction": "動作",
+    "colTarget": "對象",
+    "colDetail": "細節",
+    "colIp": "來源 IP",
+    "pageInfo": "第 {from}–{to} 條",
+    "prev": "上一頁",
+    "next": "下一頁",
+    "clearTitle": "清空稽核日誌",
+    "clearConfirm": "確定清空全部稽核日誌嗎？此操作本身會留下一條 clear_audit 記錄。",
+    "cleared": "稽核日誌已清空"
   }
 }

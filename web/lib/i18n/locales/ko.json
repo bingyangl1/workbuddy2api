@@ -1925,5 +1925,25 @@
     "autoCopyFailed": "자동 복사 실패",
     "autoCopyFailedDetail": "이전 화면으로 돌아가 직접 복사해 주세요 — 평문은 한 번만 표시됩니다",
     "alreadyWithKey": "이미 받았습니다 — 이것이 내 몫입니다"
+  },
+  "audit": {
+    "title": "감사 로그",
+    "subtitle": "관리자 민감 작업 추적",
+    "fAction": "작업별 필터",
+    "allActions": "모든 작업",
+    "clear": "감사 지우기",
+    "empty": "감사 레코드가 없습니다",
+    "colTime": "시간",
+    "colActor": "작업자",
+    "colAction": "작업",
+    "colTarget": "대상",
+    "colDetail": "세부",
+    "colIp": "출처 IP",
+    "pageInfo": "{from}–{to}번째",
+    "prev": "이전",
+    "next": "다음",
+    "clearTitle": "감사 로그 지우기",
+    "clearConfirm": "모든 감사 로그를 지우시겠습니까? 이 작업 자체가 clear_audit 레코드를 남깁니다.",
+    "cleared": "감사 로그가 지워졌습니다"
   }
 }
