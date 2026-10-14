@@ -128,7 +128,7 @@ export interface ApiKey {
   credit_limit: number;
   credit_used: number;
   unlimited: boolean;
-  status: string;             // 'active' | 'disabled'
+  status: string;             // 'active' | 'revoked'
   note: string;
   group_id: number;           // 模型分组 id；0 = 不绑定
   group_name: string;
@@ -136,10 +136,12 @@ export interface ApiKey {
   account_group_name: string;
   realm: string;              // '' | 'cn' | 'global'
   // P2 T3 全维度
-  expires_at: string | null;
-  max_ips: number;
-  ip_allowlist: string;       // JSON 数组字符串（CIDR）
-  token_quota: number;
+  expires_at: string | null;  // ISO；null = 永不过期
+  expired: boolean;           // 服务端算好（expires_at < now）
+  max_ips: number;            // 0 = 不限
+  ip_allowlist: string[];     // CIDR/单 IP 数组（list 返回已解析）；空 = 不限
+  bound_ips: number;          // 已绑定 IP 数（max_ips 生效中）
+  token_quota: number;        // 0 = 不限
   used_tokens: number;
   last_used_at: string | null;
   created_at: string | null;

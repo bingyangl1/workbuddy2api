@@ -182,10 +182,26 @@ export const accountApi = {
 };
 
 /* ── API 密钥（routers/keys.py，含 P2 T3 全维度）────────────────── */
+/** 创建/编辑密钥的入参（KeyIn + patch_key 可改字段；显式空值 = 改回「不限」）。 */
+export interface KeyPayload {
+  name?: string;
+  credit_limit?: number;
+  unlimited?: boolean;
+  note?: string;
+  status?: 'active' | 'revoked';
+  group_id?: number;            // 模型分组
+  account_group_id?: number;    // 账号池分组
+  realm?: '' | 'cn' | 'global';
+  expires_at?: string | null;   // ISO；null/'' = 永不过期
+  max_ips?: number;             // 0 = 不限
+  ip_allowlist?: string[];      // CIDR/单 IP；空 = 不限
+  token_quota?: number;         // 0 = 不限
+  reset_used?: boolean;         // true = credit_used + used_tokens 一起归零
+}
 export const keyApi = {
   list: () => get<{items: ApiKey[]}>('/api/keys'),
-  create: (body: Partial<ApiKey> & {name: string}) => post<CreatedApiKey>('/api/keys', body),
-  update: (id: number, body: Partial<ApiKey>) => patch<ApiKey>(`/api/keys/${id}`, body),
+  create: (body: KeyPayload) => post<CreatedApiKey>('/api/keys', body),
+  update: (id: number, body: KeyPayload) => patch<{id: number; ok: boolean}>(`/api/keys/${id}`, body),
   remove: (id: number) => del<{ok: boolean}>(`/api/keys/${id}`),
   usage: (id: number) => get<KeyUsage>(`/api/keys/${id}/usage`),
   /** 完整明文——JWT-only，wbt_ 只读 token 摸不到（T9 刻意保留 require_admin）。 */
