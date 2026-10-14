@@ -345,18 +345,91 @@ export interface ModelHealth {
 }
 
 /* ── 积分（routers/credits.py）──────────────────────────────────── */
-export interface CreditExpiryAccount {
-  id: number;
-  name: string;
-  uid: string;
-  balance_remain: number | null;
-  soonest_expire_at: string | null;
-  expiring_soon: number;
-  urgency?: string;
+/** credits/expiry 单个积分包（精简字段） */
+export interface CreditPackage {
+  package_code: string;
+  display_name: string;
+  remaining: number;
+  total: number;
+  expire_at: number | null;        // 毫秒时间戳
+  expire_label: string;
+  expire_date: string;
+  expired: boolean;
+  expiring_soon: boolean;
 }
+/** credits/expiry 账号行（按紧迫度升序） */
+export interface CreditExpiryAccount {
+  account_id: number;
+  account_name: string;
+  uid: string;
+  status: string;
+  balance_remain: number;
+  total_remaining: number;
+  total_capacity: number;
+  expiring_soon_remaining: number;
+  evergreen_remaining: number;
+  expired_remaining: number;
+  soonest_expire_at: number | null;
+  soonest_days_left: number | null;
+  soonest_label: string;
+  expiring_soon: boolean;
+  expiring_package_count: number;
+  package_count: number;
+  active_package_count: number;
+  synced_at: number | null;
+  next_expiring: CreditPackage[];   // 最近到期前 4 个
+}
+/** credits/expiry 汇总 */
+export interface CreditExpirySummary {
+  accounts: number;
+  available_remaining: number;      // 余额口径
+  total_remaining: number;          // 快照口径
+  snapshot_accounts: number;
+  expiring_soon_remaining: number;
+  evergreen_remaining: number;
+  expired_remaining: number;
+  expiring_accounts: number;
+  expiring_packages: number;
+  soonest_expire_at: number | null;
+  soonest_days_left: number | null;
+  soonest_account_id: number | null;
+  soonest_account_name: string | null;
+  at_risk_ratio: number;
+  packages_total: number;
+}
+export interface CreditWindow { days: number; amount: number; packages: number; }
+export interface CreditPackageRow extends CreditPackage { account_id: number; account_name: string; }
 export interface CreditExpiryStats {
+  generated_at: number;
+  expiring_soon_days: number;
+  suggested_days: number;
+  summary: CreditExpirySummary;
+  windows: CreditWindow[];
   accounts: CreditExpiryAccount[];
-  expiring_packages: CreditResource[];
+  packages: CreditPackageRow[];
+  packages_total: number;
+  package_offset: number;
+  package_limit: number;
+  has_more: boolean;
+}
+
+/** credits/usage 账号消耗行 */
+export interface CreditUsageAccount {
+  account_id: number;
+  account_name: string;
+  requests: number;
+  credits: number;
+  tokens: number;
+  remaining: number;
+  expiring_soon_remaining: number;
+  soonest_days_left: number | null;
+}
+export interface CreditUsageModel { model: string; requests: number; credits: number; }
+export interface CreditUsageStats {
+  range_days: number;
+  total_credits: number;
+  accounts: CreditUsageAccount[];
+  models: CreditUsageModel[];
 }
 
 /* ── 安全 / IP（routers/security.py，P2 T5/T6）──────────────────── */

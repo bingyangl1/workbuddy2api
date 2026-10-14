@@ -21,6 +21,7 @@ import type {
   CreatedApiToken,
   CreditDetails,
   CreditExpiryStats,
+  CreditUsageStats,
   DupRef,
   IpAccessLog,
   IpRule,
@@ -281,7 +282,7 @@ export const creditsApi = {
   expiry: (params?: {days?: number; include_disabled?: boolean}) =>
     get<CreditExpiryStats>('/api/credits/expiry', params as Record<string, unknown>),
   usage: (params?: {days?: number; account_id?: number; top?: number}) =>
-    get<Record<string, unknown>>('/api/credits/usage', params as Record<string, unknown>),
+    get<CreditUsageStats>('/api/credits/usage', params as Record<string, unknown>),
 };
 
 /* ── 安全 / IP（routers/security.py，P2 T5/T6）──────────────────── */
