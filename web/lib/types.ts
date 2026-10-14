@@ -290,25 +290,51 @@ export interface LogAccountOption {
 }
 
 /* ── 统计（routers/stats.py）────────────────────────────────────── */
-export interface UsageSeriesPoint {
-  bucket: string;             // 时间桶（按 granularity：minute/hour/day）
-  requests: number;
-  tokens: number;
-  credits: number;
-}
+/** stats/usage 分布项（by_model/by_endpoint/by_key 共用） */
 export interface UsageBreakdown {
   label: string;
   requests: number;
   tokens: number;
   credits: number;
 }
+/** stats/usage 趋势桶（按 granularity：hour/day） */
+export interface UsageTrendPoint {
+  bucket: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  credits: number;
+  requests: number;
+}
+/** stats/usage 概览卡片（成功口径计 token/积分，请求数含失败） */
+export interface UsageOverview {
+  requests: number;         // 全部调用（含失败）
+  ok_requests: number;
+  failed_requests: number;
+  credits: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cached_tokens: number;
+  avg_latency_ms: number;
+}
+/** routers/stats.py::usage_stats 完整响应（与「使用记录」页一一对应） */
 export interface UsageStats {
-  totals: {requests: number; tokens: number; credits: number};
-  series: UsageSeriesPoint[];
-  by_model?: UsageBreakdown[];
-  by_key?: UsageBreakdown[];
-  by_endpoint?: UsageBreakdown[];
-  by_account?: UsageBreakdown[];
+  range_days: number;
+  granularity: string;
+  filters: {key_id: number | null; model: string | null;
+            account_id: number | null; use_case: string | null};
+  overview: UsageOverview;
+  by_model: UsageBreakdown[];
+  by_endpoint: UsageBreakdown[];
+  by_key: UsageBreakdown[];
+  trend: UsageTrendPoint[];
+}
+/** stats/usage/options 筛选下拉（窗口内真实出现过的值） */
+export interface UsageOptions {
+  models: string[];
+  use_cases: string[];
+  keys: {id: number; name: string}[];
 }
 export interface ModelHealth {
   model: string;

@@ -56,8 +56,8 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label={t('dashboard.accounts')} value={String(accounts.length)} />
         <StatCard label={t('dashboard.activeAccounts')} value={String(active)} />
-        <StatCard label={t('dashboard.todayRequests')} value={String(usage.totals.requests)} />
-        <StatCard label={t('dashboard.todayCredits')} value={String(Math.round(usage.totals.credits))} />
+        <StatCard label={t('dashboard.todayRequests')} value={String(usage.overview.requests)} />
+        <StatCard label={t('dashboard.todayCredits')} value={String(Math.round(usage.overview.credits))} />
       </div>
 
       <section className="rounded-xl border bg-card p-4">

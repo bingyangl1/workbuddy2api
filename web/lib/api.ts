@@ -38,6 +38,7 @@ import type {
   Schedule,
   SecurityConfig,
   UsageLogPage,
+  UsageOptions,
   UsageStats,
   VersionInfo,
 } from './types';
@@ -271,8 +272,7 @@ export const statsApi = {
                     account_id?: number; use_case?: string}) =>
     get<UsageStats>('/api/stats/usage', params as Record<string, unknown>),
   options: (days = 30) =>
-    get<{keys: {id: number; name: string}[]; models: string[]; endpoints: string[]}>(
-      '/api/stats/usage/options', {days}),
+    get<UsageOptions>('/api/stats/usage/options', {days}),
   modelHealth: (hours = 24) => get<{items: ModelHealth[]}>('/api/stats/model-health', {hours}),
 };
 
