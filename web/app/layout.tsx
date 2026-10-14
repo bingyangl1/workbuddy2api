@@ -12,15 +12,15 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    template: '%s - WorkBuddy Manager',
-    default: 'WorkBuddy Manager',
+    template: '%s - WorkBuddy2API',
+    default: 'WorkBuddy2API',
   },
   /**
    * 站点描述用英文：它是构建期写进静态 HTML 的元数据，无法跟随运行时语言切换
    * （管理端本身不做语言路由，见 lib/i18n/config.ts 的说明）。选英文是因为
    * 分享卡片 / 搜索引擎抓取时它面向的受众最广；界面内的文案全部走 i18n。
    */
-  description: 'WorkBuddy Manager - Tencent CodeBuddy account pool console and OpenAI-compatible gateway',
+  description: 'WorkBuddy2API - Tencent CodeBuddy account pool console and OpenAI-compatible gateway',
   // 图标 / 清单的 URL 也要带部署前缀（PR #60 评审补漏）：Next 只给 `_next`
   // 静态资源与 next/link 跳转补 basePath，**不会**改写 metadata 里的这些字符串
   // ——实测子路径部署下产物里仍是 `href="/favicon/..."`，会被请求到域名根（通常是
