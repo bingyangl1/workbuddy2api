@@ -130,9 +130,16 @@ export const authApi = {
 /* ── 账号池（routers/accounts.py）───────────────────────────────── */
 export const accountApi = {
   list: () => get<{items: Account[]}>('/api/accounts'),
-  create: (body: {name: string; uid?: string; realm?: string; note?: string}) =>
-    post<Account>('/api/accounts', body),
-  update: (id: number, body: Partial<Account>) => patch<Account>(`/api/accounts/${id}`, body),
+  /** 添加账号：核心入参是 auth_json（腾讯授权凭证 JSON），服务端真调上游验证
+   *  并按 uid 去重（重复=新凭证覆盖）。name 留空则自动取真实昵称/uid。 */
+  create: (body: {auth_json: string; name?: string}) =>
+    post<{id: number; name: string; ok: boolean; duplicated: boolean; message?: string;
+          verified?: boolean; balance_remain?: number | null}>('/api/accounts', body),
+  /** 批量添加：verify=false 只做结构校验（导入自己刚导出的数据时用，快但不验伪造）。 */
+  createBatch: (items: {auth_json: string; name?: string}[], verify = true) =>
+    post<{ok: boolean; results: Record<string, unknown>[]}>('/api/accounts/batch', {items, verify}),
+  update: (id: number, body: {name?: string; status?: 'active' | 'disabled'}) =>
+    patch<{id: number; ok: boolean}>(`/api/accounts/${id}`, body),
   remove: (id: number) => del<{ok: boolean}>(`/api/accounts/${id}`),
   refresh: (id: number) =>
     post<{id: number; balance_total: number | null; balance_remain: number | null}>(

@@ -35,24 +35,46 @@ export interface AccountModelLimit {
   reason?: string;
 }
 
-/** routers/accounts.py::credit_details → packages 数组元素 */
-export interface CreditPackage {
-  package_code: string;
-  display_name: string;
+/** routers/accounts.py::credit_details → credits.resources 元素（camelCase，真调上游归一化） */
+export interface CreditResource {
+  packageCode: string;
+  packageName: string;
+  displayName: string;
   total: number | null;
   remaining: number | null;
-  expire_at: string | null;
-  expire_date: string;
-  expire_label: string;
+  used: number;
+  status: string;
+  expireAt: number | null;      // epoch 毫秒
+  expireLabel: string;
+  expireDate: string;
   expired: boolean;
-  expiring_soon: boolean;
+  expiringSoon: boolean;
+  daysLeft: number | null;
 }
 
+/** routers/accounts.py::credit_details 响应主体（credits 子树 + 兼容 packages） */
 export interface CreditDetails {
-  id: number;
-  packages: CreditPackage[];
-  source?: string;
-  synced_at?: string | null;
+  ok: boolean;
+  id?: number;
+  packages?: Record<string, unknown>[];   // 兼容层（旧结构），新代码别用
+  credits: {
+    ok: boolean;
+    account_id: number;
+    account_name: string;
+    updated_at: number | null;
+    total_capacity: number | null;
+    total_remaining: number | null;
+    expiring_soon_remaining: number | null;
+    expired_remaining: number | null;
+    soonest_expire_at: number | null;
+    soonest_days_left: number | null;
+    expiring_soon: boolean;
+    expired: boolean;
+    expiring_soon_days: number;
+    resources: CreditResource[];          // 仍有剩余的包，到期升序
+    all_resources: CreditResource[];      // 全量（含已用完）
+  };
+  collection?: Record<string, unknown>;
 }
 
 /** routers/accounts.py::scan_local */
@@ -222,7 +244,7 @@ export interface CreditExpiryAccount {
 }
 export interface CreditExpiryStats {
   accounts: CreditExpiryAccount[];
-  expiring_packages: CreditPackage[];
+  expiring_packages: CreditResource[];
 }
 
 /* ── 安全 / IP（routers/security.py，P2 T5/T6）──────────────────── */
