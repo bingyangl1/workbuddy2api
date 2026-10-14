@@ -324,7 +324,7 @@ export const scheduleApi = {
   update: (id: number, body: Partial<Schedule>) =>
     patch<{id: number; ok: boolean}>(`/api/schedules/${id}`, body),
   toggle: (id: number) => post<{id: number; enabled: boolean}>(`/api/schedules/${id}/toggle`),
-  runNow: (id: number) => post<{ok: boolean; error?: string}>(`/api/schedules/${id}/run`),
+  runNow: (id: number) => post<{id: number; result: {ok: boolean; error?: string; [k: string]: unknown}}>(`/api/schedules/${id}/run`),
   remove: (id: number) => del<{id: number; ok: boolean}>(`/api/schedules/${id}`),
 };
 
