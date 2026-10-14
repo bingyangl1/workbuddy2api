@@ -248,11 +248,45 @@ export interface UsageLog {
 }
 export interface UsageLogPage {
   items: UsageLog[];
-  total: number;
+  total: number | null;         // with_total=false 或 keyset 翻页时为 null（未统计）
   page: number;
   page_size: number;
   has_more: boolean;
   next_before_id: number | null;
+}
+
+/** routers/logs.py::log_summary（按账号用量汇总） */
+export interface LogSummaryItem {
+  account_id: number;
+  account_name: string;
+  requests: number;
+  failed_requests: number;
+  ok_requests: number;
+  credits: number;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  avg_latency_ms: number;
+  last_used_at: string | null;
+}
+export interface LogSummary {
+  range_days: number;
+  total_requests: number;
+  total_credits: number;
+  items: LogSummaryItem[];
+}
+
+/** routers/logs.py::log_accounts（按账号查询下拉：窗口内有记录的账号） */
+export interface LogAccountOption {
+  id: number;
+  name: string;
+  uid: string;
+  status: string;
+  balance_remain: number;
+  requests: number;
+  credits: number;
+  last_used_at: string | null;
 }
 
 /* ── 统计（routers/stats.py）────────────────────────────────────── */

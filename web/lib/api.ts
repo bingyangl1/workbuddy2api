@@ -25,7 +25,9 @@ import type {
   IpAccessLog,
   IpRule,
   KeyUsage,
+  LogAccountOption,
   LoginResponse,
+  LogSummary,
   ModelBusyResponse,
   ModelConfig,
   ModelGroup,
@@ -252,8 +254,8 @@ export const accountGroupApi = {
 /* ── 用量日志（routers/logs.py）─────────────────────────────────── */
 export const logApi = {
   list: (params?: Record<string, unknown>) => get<UsageLogPage>('/api/logs', params),
-  summary: (params?: Record<string, unknown>) => get<Record<string, unknown>>('/api/logs/summary', params),
-  accounts: (days = 30) => get<{items: {id: number; name: string}[]}>('/api/logs/accounts', {days}),
+  summary: (params?: Record<string, unknown>) => get<LogSummary>('/api/logs/summary', params),
+  accounts: (days = 30) => get<{range_days: number; items: LogAccountOption[]}>('/api/logs/accounts', {days}),
   exportUrl: (params?: Record<string, unknown>) => {
     const qs = new URLSearchParams();
     Object.entries(params || {}).forEach(([k, v]) => {
