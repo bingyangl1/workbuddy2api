@@ -85,11 +85,38 @@ export interface CreditDetails {
 }
 
 /** routers/accounts.py::scan_local */
+/** routers/accounts.py::scan_local —— 本机客户端登录态（不暴露 token，仅元信息） */
+export interface ScanLocalItem {
+  file: string;
+  uid: string;
+  nickname: string;
+  domain: string;
+  is_active: boolean;         // 是否当前活动登录态
+  expires_at: string;         // token 到期（格式化串，空=未知）
+  expires_ts: number;         // epoch 毫秒
+}
 export interface ScanLocalResult {
   exists: boolean;
   dir: string;
-  active_uid: string;
-  items: {uid: string; name?: string; imported?: boolean}[];
+  active_uid: string | null;
+  items: ScanLocalItem[];
+}
+
+/** routers/accounts.py::model_limits —— 全池模型级限流行 */
+export interface ModelLimitRow {
+  account_id: number;
+  account_name?: string;
+  model: string;
+  kind?: string;              // model_rate/model_queue/model_daily/model_block
+  until?: string | null;
+  reason?: string;
+}
+
+/** routers/accounts.py::duplicates —— keep/remove 引用 */
+export interface DupRef {
+  id: number;
+  name: string;
+  created_at: string;
 }
 
 /* ── API 密钥（routers/keys.py::list_keys）──────────────────────── */

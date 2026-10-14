@@ -21,6 +21,7 @@ import type {
   CreatedApiToken,
   CreditDetails,
   CreditExpiryStats,
+  DupRef,
   IpAccessLog,
   IpRule,
   KeyUsage,
@@ -29,6 +30,7 @@ import type {
   ModelConfig,
   ModelGroup,
   ModelHealth,
+  ModelLimitRow,
   ScanLocalResult,
   Schedule,
   SecurityConfig,
@@ -146,20 +148,35 @@ export const accountApi = {
       `/api/accounts/${id}/refresh`),
   creditDetails: (id: number, refresh = false) =>
     get<CreditDetails>(`/api/accounts/${id}/credit-details`, refresh ? {refresh: 1} : undefined),
-  modelLimits: () => get<{items: Record<string, unknown>}>('/api/accounts/model-limits'),
+  /** 全池模型级限流台账（routers/accounts.py::model_limits）。 */
+  modelLimits: () => get<{items: ModelLimitRow[]}>('/api/accounts/model-limits'),
   clearModelLimit: (id: number) =>
     post<{ok: boolean; cleared: number}>(`/api/accounts/${id}/model-limits/clear`),
-  duplicates: () => get<{items: {uid: string; keep_id: number; dup_ids: number[]}[]}>(
+  /** uid 重复分组（每组 keep=最早创建保留，remove=可清理冗余）。 */
+  duplicates: () => get<{total: number; unique: number; redundant: number;
+                        groups: {uid: string; keep: DupRef; remove: DupRef[]}[]}>(
     '/api/accounts/duplicates'),
-  dedupe: () => post<{ok: boolean; removed: number}>('/api/accounts/dedupe'),
+  /** 去重：同 uid 只留 id 最小（历史记录最全）那条。 */
+  dedupe: () => post<{removed: number; kept: number; items: {id: number; name: string; uid: string}[]}>(
+    '/api/accounts/dedupe'),
   syncCredits: () => post<{ok: boolean; synced: number}>('/api/accounts/credits/sync'),
+  /** 扫描本机客户端登录目录（服务端读，不向前端暴露 token）。 */
   scanLocal: () => get<ScanLocalResult>('/api/accounts/scan-local'),
-  importLocal: () => post<{ok: boolean; imported: number}>('/api/accounts/import-local'),
+  /** 导入本机 .info：files 为空 + all=true 导入全部。 */
+  importLocal: (files: string[], all = false) =>
+    post<{added: number; skipped: number; errors: string[]}>(
+      '/api/accounts/import-local', {files, all}),
+  /** 导出全池（含 auth_json 明文凭证——敏感，仅管理员）。 */
   exportAll: async () =>
     (await http.get<Blob>('/api/accounts/export', {responseType: 'blob'})).data,
-  exportOne: (id: number) => get<{id: number; uid: string; item: unknown}>(
+  exportOne: (id: number) => get<{id: number; uid: string; name: string; auth_json: string}>(
     `/api/accounts/${id}/export`),
-  inject: (id: number) => post<{ok: boolean; message: string}>(`/api/accounts/${id}/inject`),
+  /** 注入客户端活动登录态（先备份当前登录态）。confirm=true 才执行。 */
+  inject: (id: number) =>
+    post<{ok: boolean; target: string; backup: string | null; account: string; uid: string}>(
+      `/api/accounts/${id}/inject`, {confirm: true}),
+  /** 猫猫旅行：单账号领养+派出+领奖（结构化分步结果）。 */
+  catTravel: (id: number) => post<Record<string, unknown>>(`/api/accounts/${id}/cat-travel`),
   requestUsage: (id: number, params?: Record<string, unknown>) =>
     get<Record<string, unknown>>(`/api/accounts/${id}/request-usage`, params),
 };

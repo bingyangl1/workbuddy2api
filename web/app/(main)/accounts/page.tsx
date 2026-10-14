@@ -12,7 +12,7 @@
  */
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {accountApi, accountGroupApi, errText} from '@/lib/api';
-import type {Account, AccountGroup, CreditDetails} from '@/lib/types';
+import type {Account, AccountGroup, CreditDetails, ModelLimitRow, ScanLocalResult} from '@/lib/types';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {LoadError} from '@/components/common/states/LoadError';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
@@ -53,7 +53,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {AlertTriangle, Coins, Flame, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2} from 'lucide-react';
+import {AlertTriangle, Coins, Download, Flame, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2, Wrench} from 'lucide-react';
 
 export default function AccountsPage() {
   const t = useT();
@@ -65,6 +65,8 @@ export default function AccountsPage() {
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [creditOf, setCreditOf] = useState<Account | null>(null);
   const [deleteOf, setDeleteOf] = useState<Account | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -168,6 +170,14 @@ export default function AccountsPage() {
             <Button variant="outline" size="sm" onClick={syncAllCredits} disabled={syncing}>
               <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
               {t('accounts.syncCredits')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+              <Download className="h-4 w-4" />
+              {t('accounts.importLocal')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setToolsOpen(true)}>
+              <Wrench className="h-4 w-4" />
+              {t('accounts.tools')}
             </Button>
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -279,6 +289,10 @@ export default function AccountsPage() {
       <AddAccountDialog open={addOpen} onClose={() => setAddOpen(false)}
                         onDone={() => { setAddOpen(false); load(); }} />
       <CreditDetailsDialog account={creditOf} onClose={() => setCreditOf(null)} />
+      <ImportLocalDialog open={importOpen} onClose={() => setImportOpen(false)}
+                         onDone={() => { setImportOpen(false); load(); }} />
+      <ToolsDialog open={toolsOpen} onClose={() => setToolsOpen(false)}
+                   onChanged={load} />
 
       {/* 删除确认（行内按钮触发，受控 open） */}
       <AlertDialog open={!!deleteOf} onOpenChange={(v: boolean) => !v && setDeleteOf(null)}>
@@ -500,6 +514,283 @@ function CreditDetailsDialog({account, onClose}: {
             <RefreshCw className={cn('h-4 w-4', busy && 'animate-spin')} />
             {t('accounts.creditRefresh')}
           </Button>
+          <Button onClick={onClose}>{t('common.close')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ── 本机扫描导入（scan-local + import-local，服务端读不暴露 token）────── */
+function ImportLocalDialog({open, onClose, onDone}: {
+  open: boolean; onClose: () => void; onDone: () => void;
+}) {
+  const t = useT();
+  const [data, setData] = useState<ScanLocalResult | null>(null);
+  const [err, setErr] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
+  const scan = useCallback(async () => {
+    setErr(''); setScanning(true);
+    try {
+      const r = await accountApi.scanLocal();
+      setData(r);
+      setSelected(new Set(r.items.map((i) => i.file)));   // 默认全选
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) { setData(null); setSelected(new Set()); scan(); }
+  }, [open, scan]);
+
+  function toggle(file: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(file)) next.delete(file); else next.add(file);
+      return next;
+    });
+  }
+
+  async function doImport() {
+    if (selected.size === 0) { notify.warn(t('accounts.importNone')); return; }
+    setBusy(true);
+    try {
+      const all = data ? selected.size === data.items.length : false;
+      const r = await accountApi.importLocal(Array.from(selected), all);
+      if (r.errors.length > 0) {
+        notify.warn(t('accounts.importPartial', {added: r.added, skipped: r.skipped}),
+                    r.errors.slice(0, 3).join('；'));
+      } else {
+        notify.ok(t('accounts.importOk', {added: r.added, skipped: r.skipped}));
+      }
+      onDone();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v: boolean) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{t('accounts.importTitle')}</DialogTitle></DialogHeader>
+        {err ? (
+          <p className="text-sm text-red-500">{err}</p>
+        ) : !data || scanning ? (
+          <SkeletonBar className="h-48" />
+        ) : !data.exists ? (
+          <EmptyState title={t('accounts.importNoDir')} />
+        ) : data.items.length === 0 ? (
+          <EmptyState title={t('accounts.importEmpty')} />
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t('accounts.importDir', {dir: data.dir, n: data.items.length})}
+            </p>
+            <div className="max-h-[46vh] overflow-y-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8" />
+                    <TableHead>{t('accounts.colName')}</TableHead>
+                    <TableHead>{t('accounts.importColUid')}</TableHead>
+                    <TableHead>{t('accounts.importColExpire')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.items.map((it) => (
+                    <TableRow key={it.file} className="cursor-pointer"
+                              onClick={() => toggle(it.file)}>
+                      <TableCell>
+                        <input type="checkbox" checked={selected.has(it.file)}
+                               onChange={() => toggle(it.file)}
+                               onClick={(e) => e.stopPropagation()}
+                               className="h-4 w-4 accent-primary" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm">{it.nickname || it.uid || it.file}</span>
+                          {it.is_active && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              {t('accounts.importActive')}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-[11px] text-muted-foreground">{it.uid}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{it.expires_at || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={doImport} disabled={busy || !data || data.items.length === 0}>
+            {busy ? t('common.submitting') : t('accounts.importSubmit', {n: selected.size})}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ── 工具（去重 + 模型限流台账 + 导出全池）────────────────────────── */
+function ToolsDialog({open, onClose, onChanged}: {
+  open: boolean; onClose: () => void; onChanged: () => void;
+}) {
+  const t = useT();
+  const [limits, setLimits] = useState<ModelLimitRow[] | null>(null);
+  const [dup, setDup] = useState<{redundant: number; unique: number} | null>(null);
+  const [busy, setBusy] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [limRes, dupRes] = await Promise.all([
+        accountApi.modelLimits(),
+        accountApi.duplicates(),
+      ]);
+      setLimits(limRes.items);
+      setDup({redundant: dupRes.redundant, unique: dupRes.unique});
+    } catch (e) {
+      notify.err(errText(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) { setLimits(null); setDup(null); load(); }
+  }, [open, load]);
+
+  async function doDedupe() {
+    setBusy('dedupe');
+    try {
+      const r = await accountApi.dedupe();
+      notify.ok(t('accounts.dedupeOk', {removed: r.removed, kept: r.kept}));
+      await load();
+      onChanged();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function clearLimit(accountId: number) {
+    setBusy(`clear-${accountId}`);
+    try {
+      await accountApi.clearModelLimit(accountId);
+      notify.ok(t('accounts.limitCleared'));
+      await load();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function doExport() {
+    setBusy('export');
+    try {
+      const blob = await accountApi.exportAll();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `workbuddy-accounts-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      notify.ok(t('accounts.exportOk'));
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v: boolean) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{t('accounts.toolsTitle')}</DialogTitle></DialogHeader>
+        <div className="flex flex-col gap-5">
+          {/* 去重 */}
+          <section className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">{t('accounts.dedupeTitle')}</p>
+              <p className="text-xs text-muted-foreground">
+                {dup == null
+                  ? t('common.loading')
+                  : dup.redundant > 0
+                    ? t('accounts.dedupeFound', {redundant: dup.redundant, unique: dup.unique})
+                    : t('accounts.dedupeClean')}
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={doDedupe}
+                    disabled={busy === 'dedupe' || !dup || dup.redundant === 0}>
+              {t('accounts.dedupeRun')}
+            </Button>
+          </section>
+
+          {/* 模型限流台账 */}
+          <section className="rounded-lg border p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium">{t('accounts.limitsTitle')}</p>
+              <Badge variant="secondary">{limits?.length ?? 0}</Badge>
+            </div>
+            {limits == null ? (
+              <SkeletonBar className="h-24" />
+            ) : limits.length === 0 ? (
+              <p className="py-2 text-xs text-muted-foreground">{t('accounts.limitsEmpty')}</p>
+            ) : (
+              <div className="max-h-[32vh] overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('accounts.colName')}</TableHead>
+                      <TableHead>{t('accounts.colModel')}</TableHead>
+                      <TableHead className="text-right">{t('accounts.colActions')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {limits.map((l, i) => (
+                      <TableRow key={`${l.account_id}-${l.model}-${i}`}>
+                        <TableCell className="text-sm">{l.account_name || `#${l.account_id}`}</TableCell>
+                        <TableCell className="font-mono text-xs">{l.model}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm"
+                                  disabled={busy === `clear-${l.account_id}`}
+                                  onClick={() => clearLimit(l.account_id)}>
+                            {t('accounts.limitClear')}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </section>
+
+          {/* 导出全池 */}
+          <section className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">{t('accounts.exportTitle')}</p>
+              <p className="text-xs text-muted-foreground">{t('accounts.exportHint')}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={doExport} disabled={busy === 'export'}>
+              <Download className="h-4 w-4" />
+              {t('accounts.exportRun')}
+            </Button>
+          </section>
+        </div>
+        <DialogFooter>
           <Button onClick={onClose}>{t('common.close')}</Button>
         </DialogFooter>
       </DialogContent>
