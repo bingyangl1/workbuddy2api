@@ -25,6 +25,7 @@ from admin.ratelimit import (clear_failures, get_client_ip, get_trusted_client_i
 from admin.security import (
     create_admin_token,
     hash_password,
+    is_upstream_write,
     require_admin,
     verify_password,
 )
@@ -106,6 +107,26 @@ async def _security_headers(request: Request, call_next):
     if request.url.path.startswith(("/api", "/admin")):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
+
+
+@app.middleware("http")
+async def _upstream_readonly_guard(request: Request, call_next):
+    """上游只读测试护栏（ADMIN_UPSTREAM_READONLY=1 时启用）。
+
+    拦截管理面里会真实触达上游腾讯/WorkBuddy 的写操作（做成长任务/领奖/
+    强制刷新余额/测速/同步模型/token 注入/猫猫旅行/定时任务立即运行），
+    返回 403，避免测试/截图核验误伤账号。本地 DB CRUD 与 /v1 /gw 网关
+    转发一律放行。
+    """
+    if settings.UPSTREAM_READONLY and is_upstream_write(
+            request.method, request.url.path):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "上游只读模式已启用（ADMIN_UPSTREAM_READONLY=1），"
+                               "该操作会触达上游已被拦截"},
+        )
+    return await call_next(request)
 
 
 app.add_middleware(GatewayAdmissionMiddleware)

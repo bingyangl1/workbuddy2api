@@ -89,6 +89,17 @@ class Settings:
     #: 静态产物目录（相对 admin/ 的上级，即仓库根的 web/out）。
     PANEL_DIR = os.path.join(_ROOT, "web", "out")
 
+    # ---------- 测试护栏（防测试误伤账号） ----------
+    #: 上游只读模式。设 1 后，管理面里**会真实触达上游腾讯/WorkBuddy 的写操作**
+    #: （做成长任务/领奖/强制刷新余额/测速/同步模型/token 注入客户端/猫猫旅行/
+    #: 定时任务立即运行等）统一返回 403，避免测试/截图核验时没轻没重地把号
+    #: 打限流甚至封号。默认关闭（0）不影响正常使用。
+    #:
+    #: 只挡「管理面触上游」，**不影响** /v1 /gw 网关的正常转发（那才是调用
+    #: 模型干活的正路，正常用不会被它限流）。本地 DB 的 CRUD（账号/密钥/
+    #: 分组/配置/审计清理等不触上游）也照常放行。
+    UPSTREAM_READONLY = os.getenv("ADMIN_UPSTREAM_READONLY", "0") == "1"
+
     # /v1/messages（Anthropic Messages API）的模型档次映射。
     # Claude Code 发的是 claude-opus-* / claude-sonnet-* / claude-haiku-* 这类名字，
     # 上游不认；这里按档次落到本后台白名单里的模型名。

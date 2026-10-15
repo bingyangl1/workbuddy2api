@@ -85,6 +85,41 @@ def require_admin_read(x_admin_token=Header(default=None, alias="X-Admin-Token")
 
 
 # ---------------------------------------------------------------------------
+# 上游只读测试护栏（ADMIN_UPSTREAM_READONLY）
+# ---------------------------------------------------------------------------
+
+#: 会真实触达上游腾讯/WorkBuddy（消耗额度/写上游状态/打限流风险）的管理面
+#: 路由前缀。**只列管理面**，不含 /v1 /gw 网关转发。本地 DB CRUD 不在此列。
+_UPSTREAM_WRITE_ROUTES = (
+    "/api/growth/accept",
+    "/api/growth/run",
+    "/api/growth/run-async",
+    "/api/growth/claim",
+    "/api/accounts/credits/sync",       # 全量强制刷新余额（打上游）
+    "/api/accounts/cat-travel",          # 猫猫旅行（单个 + batch + batch-async）
+    "/api/models/sync",                  # 从上游同步模型列表
+    "/api/models/speed-test",            # 真实流式请求测速（占账号）
+)
+#: accounts 下带 id 的上游写：/{id}/refresh、/{id}/inject、/{id}/cat-travel
+_UPSTREAM_WRITE_ACCOUNT_SUB = ("/refresh", "/inject", "/cat-travel")
+#: schedules 立即运行内置任务（部分任务打上游）：/{sid}/run
+_UPSTREAM_WRITE_SCHEDULE_SUB = ("/run",)
+
+
+def is_upstream_write(method: str, path: str) -> bool:
+    """判定该管理面请求是否会真实触达上游。供测试护栏中间件与审计共用。"""
+    if method.upper() != "POST":
+        return False
+    if any(path.startswith(p) for p in _UPSTREAM_WRITE_ROUTES):
+        return True
+    if path.startswith("/api/accounts/") and path.endswith(_UPSTREAM_WRITE_ACCOUNT_SUB):
+        return True
+    if path.startswith("/api/schedules/") and path.endswith(_UPSTREAM_WRITE_SCHEDULE_SUB):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # 管理后台密码（PBKDF2 哈希存储，杜绝明文泄漏）
 # ---------------------------------------------------------------------------
 
