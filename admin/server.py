@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from admin.config import settings
 from admin.db import SessionLocal, init_db, wait_database_ready
 from admin.models import SystemSetting
-from admin.routers import (account_groups, accounts, app_source, audit,
+from admin.routers import (account_groups, accounts, app_source, audit, backup,
                            client_profile, credits, groups, growth, keys,
                            login as login_router, logs, models, playground, proxy,
                            schedules, security as security_router, stats, sync, tokens)
@@ -147,6 +147,7 @@ app.include_router(client_profile.router)
 app.include_router(app_source.router)
 app.include_router(login_router.router)
 app.include_router(releases.router)
+app.include_router(backup.router)       # P5：本地快照备份/恢复
 app.include_router(audit.router)      # P2 T2：操作审计
 app.include_router(tokens.router)     # P2 T7：管理面只读 API Token
 app.include_router(security_router.router)  # P2 T5：入站 IP 管控

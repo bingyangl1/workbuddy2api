@@ -89,6 +89,13 @@ class Settings:
     #: 静态产物目录（相对 admin/ 的上级，即仓库根的 web/out）。
     PANEL_DIR = os.path.join(_ROOT, "web", "out")
 
+    # ---------- 本地快照备份（P5） ----------
+    #: 部署根（config.py 上级目录）。备份目录与 CHANGELOG.md 都相对它定位。
+    ROOT = _ROOT
+    #: 备份文件目录。默认 <部署根>/backups；可用 ADMIN_BACKUP_DIR 覆盖
+    #: （部署时建议指到数据盘/独立卷，别和代码同分区）。
+    BACKUP_DIR = os.getenv("ADMIN_BACKUP_DIR", os.path.join(_ROOT, "backups"))
+
     # ---------- 测试护栏（防测试误伤账号） ----------
     #: 上游只读模式。设 1 后，管理面里**会真实触达上游腾讯/WorkBuddy 的写操作**
     #: （做成长任务/领奖/强制刷新余额/测速/同步模型/token 注入客户端/猫猫旅行/
