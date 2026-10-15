@@ -198,7 +198,6 @@
     "creditsLow": "{n} 个账号低于 200",
     "creditsCovered": "覆盖 {n} 个账号",
     "todayTokens": "今日 Token",
-    "todayRequests": "{n} 次请求 · {realm}",
     "trend14": "近 14 天调用趋势",
     "requestsByRealm": "请求数 · {realm}",
     "noCallData": "暂无调用数据",
@@ -232,9 +231,10 @@
     "noData": "暂无数据",
     "colModel": "模型",
     "colRequests": "请求数",
-    "colErrorRate": "错误率",
     "colLatency": "平均时延",
-    "balanceNote": "全部账号剩余积分合计约 {total}"
+    "balanceNote": "全部账号剩余积分合计约 {total}",
+    "todayRequestsLabel": "今日请求",
+    "colSuccessRate": "成功率"
   },
   "stats": {
     "title": "用量统计",

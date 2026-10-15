@@ -198,7 +198,6 @@
     "creditsLow": "{n} 件が 200 未満",
     "creditsCovered": "{n} 件を集計",
     "todayTokens": "本日の Token",
-    "todayRequests": "{n} 回のリクエスト · {realm}",
     "trend14": "直近 14 日のリクエスト推移",
     "requestsByRealm": "リクエスト数 · {realm}",
     "noCallData": "リクエストデータがありません",
@@ -232,9 +231,10 @@
     "noData": "データなし",
     "colModel": "モデル",
     "colRequests": "リクエスト",
-    "colErrorRate": "エラー率",
     "colLatency": "平均遅延",
-    "balanceNote": "全アカウントの残クレジット合計 約 {total}"
+    "balanceNote": "全アカウントの残クレジット合計 約 {total}",
+    "todayRequestsLabel": "本日のリクエスト",
+    "colSuccessRate": "成功率"
   },
   "stats": {
     "title": "使用量",

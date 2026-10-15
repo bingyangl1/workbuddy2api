@@ -198,7 +198,6 @@
     "creditsLow": "{n}개 계정이 200 미만",
     "creditsCovered": "{n}개 계정 집계",
     "todayTokens": "오늘 Token",
-    "todayRequests": "{n}회 요청 · {realm}",
     "trend14": "최근 14일 요청 추이",
     "requestsByRealm": "요청 수 · {realm}",
     "noCallData": "요청 데이터가 없습니다",
@@ -232,9 +231,10 @@
     "noData": "데이터 없음",
     "colModel": "모델",
     "colRequests": "요청",
-    "colErrorRate": "오류율",
     "colLatency": "평균 지연",
-    "balanceNote": "전체 계정 잔여 크레딧 합계 약 {total}"
+    "balanceNote": "전체 계정 잔여 크레딧 합계 약 {total}",
+    "todayRequestsLabel": "오늘 요청",
+    "colSuccessRate": "성공률"
   },
   "stats": {
     "title": "사용량",

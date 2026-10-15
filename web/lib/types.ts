@@ -336,12 +336,26 @@ export interface UsageOptions {
   use_cases: string[];
   keys: {id: number; name: string}[];
 }
+/** stats/model-health（admin/health.py::model_health）单行。
+ * 注意：字段名是 requests/success_rate/latency_ms.p50，不是 total/error_rate。 */
 export interface ModelHealth {
   model: string;
-  total: number;
-  errors: number;
-  error_rate: number;
-  avg_latency_ms: number;
+  enabled: boolean;
+  free: boolean;
+  eligible_accounts: number;
+  available_accounts: number;
+  limited_accounts: number;
+  earliest_model_recovery: string | null;
+  limit_reasons: Record<string, number>;
+  requests: number;
+  successes: number;
+  failures: number;
+  success_rate: number | null;      // 窗口无请求时为 null
+  failure_rate: number | null;
+  failure_reasons: Record<string, number>;
+  ttfb_ms: {p50: number | null; p95: number | null};
+  latency_ms: {p50: number | null; p95: number | null};
+  latency_sample_count: number;
 }
 
 /* ── 积分（routers/credits.py）──────────────────────────────────── */

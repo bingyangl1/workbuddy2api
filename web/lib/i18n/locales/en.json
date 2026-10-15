@@ -222,7 +222,6 @@
     "creditsLow": "{n} accounts below 200",
     "creditsCovered": "Across {n} accounts",
     "todayTokens": "Tokens today",
-    "todayRequests": "{n} requests · {realm}",
     "trend14": "Requests over the last 14 days",
     "requestsByRealm": "Requests · {realm}",
     "noCallData": "No request data yet",
@@ -256,9 +255,10 @@
     "noData": "No data",
     "colModel": "Model",
     "colRequests": "Requests",
-    "colErrorRate": "Error rate",
     "colLatency": "Avg latency",
-    "balanceNote": "Total remaining credits across accounts ≈ {total}"
+    "balanceNote": "Total remaining credits across accounts ≈ {total}",
+    "todayRequestsLabel": "Requests today",
+    "colSuccessRate": "Success rate"
   },
   "stats": {
     "title": "Usage",

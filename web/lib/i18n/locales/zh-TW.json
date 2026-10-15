@@ -198,7 +198,6 @@
     "creditsLow": "{n} 個帳號低於 200",
     "creditsCovered": "涵蓋 {n} 個帳號",
     "todayTokens": "今日 Token",
-    "todayRequests": "{n} 次請求 · {realm}",
     "trend14": "近 14 天呼叫趨勢",
     "requestsByRealm": "請求數 · {realm}",
     "noCallData": "暫無呼叫資料",
@@ -232,9 +231,10 @@
     "noData": "暫無資料",
     "colModel": "模型",
     "colRequests": "請求數",
-    "colErrorRate": "錯誤率",
     "colLatency": "平均時延",
-    "balanceNote": "全部帳號剩餘積分合計約 {total}"
+    "balanceNote": "全部帳號剩餘積分合計約 {total}",
+    "todayRequestsLabel": "今日請求",
+    "colSuccessRate": "成功率"
   },
   "stats": {
     "title": "用量統計",

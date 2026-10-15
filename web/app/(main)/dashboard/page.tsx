@@ -56,7 +56,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label={t('dashboard.accounts')} value={String(accounts.length)} />
         <StatCard label={t('dashboard.activeAccounts')} value={String(active)} />
-        <StatCard label={t('dashboard.todayRequests')} value={String(usage.overview.requests)} />
+        <StatCard label={t('dashboard.todayRequestsLabel')} value={String(usage.overview.requests)} />
         <StatCard label={t('dashboard.todayCredits')} value={String(Math.round(usage.overview.credits))} />
       </div>
 
@@ -71,7 +71,7 @@ export default function DashboardPage() {
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="py-2 pr-4 font-medium">{t('dashboard.colModel')}</th>
                   <th className="py-2 pr-4 font-medium">{t('dashboard.colRequests')}</th>
-                  <th className="py-2 pr-4 font-medium">{t('dashboard.colErrorRate')}</th>
+                  <th className="py-2 pr-4 font-medium">{t('dashboard.colSuccessRate')}</th>
                   <th className="py-2 font-medium">{t('dashboard.colLatency')}</th>
                 </tr>
               </thead>
@@ -79,9 +79,13 @@ export default function DashboardPage() {
                 {health.map((h) => (
                   <tr key={h.model} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-mono text-xs">{h.model}</td>
-                    <td className="py-2 pr-4">{h.total}</td>
-                    <td className="py-2 pr-4">{(h.error_rate * 100).toFixed(1)}%</td>
-                    <td className="py-2">{Math.round(h.avg_latency_ms)} ms</td>
+                    <td className="py-2 pr-4">{h.requests}</td>
+                    <td className="py-2 pr-4">
+                      {h.success_rate == null ? '—' : `${(h.success_rate * 100).toFixed(1)}%`}
+                    </td>
+                    <td className="py-2">
+                      {h.latency_ms?.p50 == null ? '—' : `${Math.round(h.latency_ms.p50)} ms`}
+                    </td>
                   </tr>
                 ))}
               </tbody>
