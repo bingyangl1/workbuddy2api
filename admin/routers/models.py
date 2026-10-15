@@ -175,6 +175,37 @@ def sync_models(_: bool = Depends(require_admin), db: Session = Depends(get_db))
     return _do_sync_models(db)
 
 
+@router.get("/catalog")
+def model_catalog(
+    realm: str = "cn",
+    force: bool = False,
+    _: bool = Depends(require_admin_read),
+    db: Session = Depends(get_db),
+):
+    """模型中心目录：按 realm 直连腾讯模型目录（字段更全），回退上游清单。
+
+    返回每个模型的显示名/描述/上下文/最大输出/推理档位/能力标记/系列/积分倍率，
+    并如实标注数据来源（source/source_label：tencent 直连 or none）。
+    倍率与启停状态来自本地 ModelConfig（按 model_id 关联），目录元数据来自腾讯。
+
+    护栏说明：本端点会真实调用腾讯接口（只读 GET，不消耗积分）。
+    UPSTREAM_READONLY 不拦截（它只挡会消耗/改状态的写操作）。
+    """
+    from admin import model_catalog as mc
+
+    result = mc.catalog(db, realm=realm, force=force)
+    # 合并本地 ModelConfig：积分倍率 + 启停状态（目录元数据不含这两个本地字段）
+    configs = {m.model_id: m for m in db.query(ModelConfig).all()}
+    for item in result.get("models", []):
+        cfg = configs.get(item["id"])
+        item["credit_multiplier"] = float(cfg.credit_multiplier or 0) if cfg else 0.0
+        item["credits_raw"] = (cfg.credits_raw or "") if cfg else ""
+        item["enabled"] = bool(cfg.enabled) if cfg else False
+        item["is_free"] = (item["credit_multiplier"] == 0)
+        item["in_local_config"] = cfg is not None
+    return result
+
+
 @router.patch("/{config_id}")
 def toggle_model(
     config_id: int,
