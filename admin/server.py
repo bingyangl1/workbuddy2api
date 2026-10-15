@@ -365,14 +365,31 @@ def change_password(body: PasswordChangeIn, _: bool = Depends(require_admin)):
     return {"ok": True}
 
 
+def _default_panel_path() -> str:
+    """默认面板落点：next + PANEL_STATIC=1 时进新面板，否则旧面板 /admin-legacy。"""
+    if settings.DEFAULT_PANEL == "next" and settings.PANEL_STATIC:
+        return settings.PANEL_PATH
+    return "/admin-legacy"
+
+
 @app.get("/")
 def index_redirect():
-    return RedirectResponse(url="/admin")
+    return RedirectResponse(url=_default_panel_path())
+
+
+@app.get("/admin-legacy")
+@app.get("/admin-legacy/")
+def admin_legacy_index():
+    """旧管理面板（125 路由的原始页面）。平价验收 100% 前它仍是默认。"""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/admin")
 @app.get("/admin/")
 def admin_index():
+    """/admin 落到当前默认面板：legacy→旧面板，next(+PANEL_STATIC)→新面板。"""
+    if settings.DEFAULT_PANEL == "next" and settings.PANEL_STATIC:
+        return RedirectResponse(url=settings.PANEL_PATH + "/")
     return FileResponse(STATIC_DIR / "index.html")
 
 

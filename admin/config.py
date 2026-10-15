@@ -100,6 +100,14 @@ class Settings:
     #: 分组/配置/审计清理等不触上游）也照常放行。
     UPSTREAM_READONLY = os.getenv("ADMIN_UPSTREAM_READONLY", "0") == "1"
 
+    # ---------- 默认面板切换（P3 收尾） ----------
+    #: 默认管理面板用哪个。`legacy`（默认）= 旧面板（admin/static/index.html，
+    #: 平价验收 100% 前的稳妥项）；`next` = 新面板（web/out，PANEL_STATIC=1 时
+    #: 挂在 PANEL_PATH）。影响 `/` 与 `/admin` 的落点：默认面板落在 /admin，
+    #: 另一个保留在 /admin-legacy（旧）或 PANEL_PATH（新）。设 ADMIN_DEFAULT_PANEL=next
+    #: 且 PANEL_STATIC=1 后，`/` 与 `/admin` 都进新面板。
+    DEFAULT_PANEL = os.getenv("ADMIN_DEFAULT_PANEL", "legacy").lower()
+
     # /v1/messages（Anthropic Messages API）的模型档次映射。
     # Claude Code 发的是 claude-opus-* / claude-sonnet-* / claude-haiku-* 这类名字，
     # 上游不认；这里按档次落到本后台白名单里的模型名。
