@@ -99,13 +99,27 @@ app.add_middleware(
 
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
-    """统一安全响应头：防点击劫持 / MIME 嗅探 / 敏感头泄露。"""
+    """统一安全响应头：防点击劫持 / MIME 嗅探 / 敏感头泄露 + 静态产物缓存策略。"""
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
-    if request.url.path.startswith(("/api", "/admin")):
+    path = request.url.path
+    if path.startswith(("/api", "/admin")):
         response.headers.setdefault("Cache-Control", "no-store")
+    elif path.startswith(settings.PANEL_PATH):
+        # 面板产物的缓存策略分两类（更新后 404 的根因就在这）：
+        #   * 带内容哈希的资源（/_next/static/...）：内容变则文件名变，
+        #     可以长缓存（immutable），省流量且刷新无成本。
+        #   * **HTML 与其它无哈希文件**：绝不能长缓存——静态导出重建后
+        #     chunk 文件名全变，浏览器若还拿旧 HTML，就会去请求已被删除的
+        #     旧 chunk，表现为 `ChunkLoadError: Loading chunk xxx failed`（实测踩过：
+        #     重建面板后 /tokens 页整页白屏 + 404）。
+        #     `no-cache` 表示「可缓存但每次必须回源校验」，命中 304 时开销极小。
+        if "/_next/static/" in path:
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            response.headers.setdefault("Cache-Control", "no-cache, must-revalidate")
     return response
 
 

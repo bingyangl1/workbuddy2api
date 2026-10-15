@@ -126,7 +126,8 @@ export default function SettingsPage() {
         title={t('settings.title')}
         description={t('settings.subtitle')}
         actions={
-          <div className="flex gap-2">
+          // flex-wrap：375px 下四个按钮排不下，必须换行（否则页面横向溢出）
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" asChild>
               <a href={`${BASE_PATH}/changelog/`}><ScrollText className="h-4 w-4" />{t('nav.changelog')}</a>
             </Button>

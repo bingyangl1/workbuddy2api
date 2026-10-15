@@ -162,6 +162,46 @@ def _build(db: Session, realm: str) -> dict:
             }
         errors.append(f"{acc.name or acc.uid}: 返回为空")
 
+    # ── 回退级：本地已同步的上游清单（ModelConfig 表） ──────────────────
+    # 腾讯接口调不通（账号全过期 / 网络问题 / 上游返回非 JSON）时用这一级：
+    # 字段少（无显示名/描述/档位，最多有倍率与备注），但保证页面不空白。
+    # **如实标注来源**，不让用户误以为拿到的是完整的腾讯目录。
+    from admin.models import ModelConfig
+    cfg_rows = db.query(ModelConfig).filter(ModelConfig.level == "system").all()
+    fallback = []
+    for row in cfg_rows:
+        mid = str(row.model_id or "")
+        if not mid or mid.lower() == "auto":
+            continue
+        fallback.append({
+            "id": mid,
+            "name": str(row.note or ""),
+            "description": "",
+            "context_length": 0,
+            "max_output_tokens": 0,
+            "efforts": [],
+            "default_effort": "",
+            "can_disable_thinking": False,
+            "supports_reasoning": False,
+            "supports_images": False,
+            "supports_tool_call": False,
+            "only_reasoning": False,
+            "reasoning_summary": "",
+            "tags": [],
+            "vendor": "",
+            "series": series_of(mid),
+            "is_default": False,
+            "disabled_multimodal": False,
+        })
+    if fallback:
+        return {
+            "models": fallback,
+            "source": "local",
+            "source_label": "本地已同步清单（腾讯目录暂不可用，缺显示名与推理档位）",
+            "via": "",
+            "errors": errors,
+        }
+
     return {
         "models": [],
         "source": "none",

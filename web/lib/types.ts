@@ -389,7 +389,8 @@ export interface CatalogModel {
 
 export interface ModelCatalogResponse {
   models: CatalogModel[];
-  source: 'tencent' | 'upstream' | 'none';
+  // tencent=腾讯目录直连（字段最全）；local=本地已同步清单回退（缺显示名/档位）；none=无数据
+  source: 'tencent' | 'local' | 'upstream' | 'none';
   source_label: string;
   via: string;
   errors: string[];

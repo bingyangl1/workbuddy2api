@@ -170,6 +170,36 @@ class CatalogCacheCase(unittest.TestCase):
         self.assertEqual(r["models"], [])
         self.assertTrue(r["errors"])
 
+    def test_falls_back_to_local_configs(self):
+        """腾讯不可用（账号报错）→ 回退本地 ModelConfig 清单，source=local。
+
+        这是 PAGE 要求的两级来源：腾讯直连优先，失败回退上游已同步清单，
+        并**如实标注**来源（不让用户误以为拿到完整腾讯目录）。
+        """
+        self._seed_account("cn")
+        with self.factory() as db:
+            from admin.models import ModelConfig
+            db.add(ModelConfig(model_id="glm-5.2", level="system", enabled=1,
+                               credit_multiplier=1.5, note="GLM 5.2"))
+            db.add(ModelConfig(model_id="deepseek-v4-pro", level="system", enabled=1))
+            db.commit()
+        with mock.patch("admin.backend.AccountSession") as S:
+            # 腾讯调用抛异常（模拟上游返回非 JSON）
+            S.return_value.__enter__.return_value.fetch_models.side_effect = \
+                ValueError("Expecting value: line 1 column 2")
+            r = self.mc.catalog(self.factory(), realm="cn")
+        self.assertEqual(r["source"], "local")
+        self.assertIn("本地已同步清单", r["source_label"])
+        ids = sorted(m["id"] for m in r["models"])
+        self.assertEqual(ids, ["deepseek-v4-pro", "glm-5.2"])
+        # 回退条目保留本地备注/倍率线索，但档位为空（不编造）
+        glm = next(m for m in r["models"] if m["id"] == "glm-5.2")
+        self.assertEqual(glm["name"], "GLM 5.2")
+        self.assertEqual(glm["efforts"], [])
+        self.assertEqual(glm["series"], "GLM")
+        # 错误如实带出
+        self.assertTrue(r["errors"])
+
 
 class RouteCase(unittest.TestCase):
     """路由：合并本地 ModelConfig 倍率/启停 + realm 校验。"""

@@ -74,6 +74,7 @@ scripts/*.py
 !scripts/build_desktop.py
 !scripts/update.py
 !scripts/security_baseline.py
+!scripts/panel_smoke_test.py
 
 # ===== 强制保留（即便以点开头也要提交） =====
 !.gitignore

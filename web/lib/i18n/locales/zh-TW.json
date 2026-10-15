@@ -952,7 +952,7 @@
     "colReal": "真實模型"
   },
   "models": {
-    "title": "模型中心",
+    "title": "模型管理",
     "description": "{realm}帳號可用的模型及上下文、輸出與推理能力（資料取自騰訊模型介面）",
     "refetchTitle": "重新拉取（正常快取 5 分鐘，避免頻繁請求觸發風控）",
     "refetch": "重新拉取",
