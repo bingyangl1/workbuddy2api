@@ -114,3 +114,7 @@ web/next-env.d.ts
 web/tsconfig.tsbuildinfo
 # manager 业务页/组件暂存区（Wave B 逐页适配时取回；不进仓）
 web-wip/
+
+# 本地引擎运行日志（诊断用，不入库）
+_eng.log
+_eng.err

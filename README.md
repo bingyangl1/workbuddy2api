@@ -1561,6 +1561,7 @@ workbuddy2api/
 │   ├── build_desktop.py                 # Windows x64 一键打包（含 web/out 构建）
 │   ├── update.py                        # 一键更新：先验签后解压 + 重施基线
 │   ├── security_baseline.py             # 安全基线审计/收敛（更新后必跑）
+│   ├── panel_smoke_test.py              # 面板全流程浏览器静默测试（18 页 + 交互 + 移动端）
 │   ├── watchdog.sh                      # Linux 看门狗（健康检查失败自动拉起）
 │   └── daemon.ps1                       # Windows 部署用守护脚本
 ├── web/                      # 现代化面板（Next.js 15 静态导出 + shadcn/ui + Tailwind v4）
@@ -1628,7 +1629,7 @@ workbuddy2api/
 > **含未脱敏的真实手机号与 token 片段**，属于内部资料而非产品代码，不进仓库。
 >
 > `scripts/*.py` 默认忽略（本地诊断脚本），**产品级脚本已加例外入库**：
-> `build_desktop.py` / `update.py` / `security_baseline.py`。
+> `build_desktop.py` / `update.py` / `security_baseline.py` / `panel_smoke_test.py`。
 > `tests/` 已入库（`!tests/test_*.py` 例外），本地诊断类脚本仍在忽略之列。
 
 #### 管理大屏的面板状态：地址栏 `?tab=`
