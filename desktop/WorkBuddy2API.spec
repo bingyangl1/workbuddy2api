@@ -7,6 +7,9 @@ root = Path(SPECPATH).parent
 version = json.loads((root / 'desktop/version.json').read_text(encoding='utf-8'))['version']
 name = f'WorkBuddy2API-{version}-windows-x64'
 datas = [(str(root / 'admin/static'), 'admin/static'),
+         # 新面板静态导出产物（P3）：frozen 后解到 _MEIPASS/web/out，
+         # PANEL_DIR 同源定位。须先 scripts/build_desktop.py 构建（它先跑 web build）。
+         (str(root / 'web/out'), 'web/out'),
          (str(root / 'turing_helper.js'), '.'),
          (str(root / 'desktop/version.json'), 'desktop'),
          (str(root / 'desktop/apply-update.ps1'), 'desktop'),

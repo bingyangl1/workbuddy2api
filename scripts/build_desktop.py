@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dist-dir", default="dist", help="Output folder; useful while an older EXE is running")
+    parser.add_argument("--rebuild-web", action="store_true",
+                        help="Force rebuild of web/out even if it already exists")
     args = parser.parse_args()
     destination = (ROOT / args.dist_dir).resolve()
     if sys.platform != "win32" or platform.machine().lower() not in ("amd64", "x86_64"):
@@ -46,6 +48,19 @@ def main():
         StringStruct('ProductVersion', '{version}')])]),
         VarFileInfo([VarStruct('Translation', [1033, 1200])])])'''
     (ROOT / "build/version-resource.txt").write_text(resource, encoding="utf-8")
+
+    # 新面板静态导出产物（P3）：spec 把 web/out 打进 EXE，这里先构建。
+    # basePath 必须与部署路径一致——桌面版 WebView2 走 FastAPI 同源 /panel，
+    # 故 NEXT_PUBLIC_BASE_PATH=/panel。
+    web_dir = ROOT / "web"
+    if not (web_dir / "out" / "index.html").is_file() or args.rebuild_web:
+        npm = "npm.cmd" if sys.platform == "win32" else "npm"
+        env_web = dict(os.environ, NEXT_OUTPUT_EXPORT="1", NEXT_PUBLIC_BASE_PATH="/panel")
+        print("Building web/out (NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel) ...")
+        subprocess.run([npm, "run", "build"], cwd=web_dir, env=env_web, check=True)
+    if not (web_dir / "out" / "index.html").is_file():
+        raise SystemExit("web/out/index.html missing after build; cannot package panel")
+
     env = dict(os.environ, PYTHONUTF8="1")
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
                     "--distpath", str(destination),
