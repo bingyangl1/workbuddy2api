@@ -56,7 +56,8 @@
     "profile": "个人信息",
     "redPackets": "红包",
     "catalog": "模型中心",
-    "changelog": "更新日志"
+    "changelog": "更新日志",
+    "backup": "数据备份"
   },
   "login": {
     "subtitle": "腾讯 CodeBuddy 账号池管理 · OpenAI 兼容反代网关",
@@ -1929,5 +1930,37 @@
     "seriesDerived": "系列为按名称推导值",
     "ctxCompact": "{k}K",
     "vendorLabel": "厂商"
+  },
+  "backup": {
+    "title": "数据备份",
+    "description": "本地快照导出 / 下载 / 恢复（覆盖式恢复前自动留底）",
+    "refresh": "刷新",
+    "fileName": "文件名（可留空自动生成）",
+    "fileNamePlaceholder": "snapshot-20261016.json",
+    "includeSecrets": "包含敏感凭据",
+    "export": "导出快照",
+    "secretsWarn": "含密快照包含账号凭据（auth_json）与密钥 hash——文件本身等价于账号池，请妥善保管，勿放公开位置。",
+    "redactedHint": "脱敏快照：凭据/密钥/IP 已替换为占位符，结构完整，适合评审与体积评估（不能用于恢复完整功能）。",
+    "exportOk": "已导出 {name}（{n} 字节）",
+    "noFiles": "还没有备份文件。上方导出即可创建第一份。",
+    "colName": "文件",
+    "colSize": "大小",
+    "colTime": "时间",
+    "colKind": "类型",
+    "colActions": "操作",
+    "kindAuto": "恢复留底",
+    "kindManual": "手动导出",
+    "preview": "预览",
+    "restore": "恢复",
+    "close": "关闭",
+    "cancel": "取消",
+    "format": "格式",
+    "withSecrets": "含凭据",
+    "redacted": "已脱敏",
+    "restoreTitle": "确认恢复？",
+    "restoreDesc": "{name} 将**覆盖**当前全部业务表（账号 / 密钥 / 用量 / 配置）。后端会在恢复前自动留底一份 pre-restore 文件，失败则整体回滚。",
+    "restoreConfirm": "覆盖式恢复",
+    "restoreOk": "恢复完成，留底：{name}",
+    "restoreBanner": "已恢复 {n} 行数据；恢复前自动留底：{safeguard}"
   }
 }

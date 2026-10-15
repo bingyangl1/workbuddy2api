@@ -56,7 +56,8 @@
     "profile": "Profile",
     "redPackets": "Red packets",
     "catalog": "Catalog",
-    "changelog": "Changelog"
+    "changelog": "Changelog",
+    "backup": "Backup"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy account pool console · OpenAI-compatible gateway",
@@ -2162,5 +2163,37 @@
     "seriesDerived": "Series is name-derived",
     "ctxCompact": "{k}K",
     "vendorLabel": "Vendor"
+  },
+  "backup": {
+    "title": "Backup",
+    "description": "Local snapshot export / download / restore (auto safeguard before overwrite)",
+    "refresh": "Refresh",
+    "fileName": "File name (leave blank to auto-generate)",
+    "fileNamePlaceholder": "snapshot-20261016.json",
+    "includeSecrets": "Include secrets",
+    "export": "Export snapshot",
+    "secretsWarn": "A snapshot with secrets contains account credentials (auth_json) and key hashes — the file is equivalent to your account pool. Keep it safe.",
+    "redactedHint": "Redacted snapshot: credentials/keys/IPs replaced with placeholders, structure intact — good for review (cannot fully restore).",
+    "exportOk": "Exported {name} ({n} bytes)",
+    "noFiles": "No backups yet. Export above to create the first one.",
+    "colName": "File",
+    "colSize": "Size",
+    "colTime": "Time",
+    "colKind": "Kind",
+    "colActions": "Actions",
+    "kindAuto": "Auto safeguard",
+    "kindManual": "Manual",
+    "preview": "Preview",
+    "restore": "Restore",
+    "close": "Close",
+    "cancel": "Cancel",
+    "format": "Format",
+    "withSecrets": "with secrets",
+    "redacted": "redacted",
+    "restoreTitle": "Confirm restore?",
+    "restoreDesc": "{name} will **overwrite** all business tables (accounts / keys / usage / config). A pre-restore safeguard is written first; failures roll back entirely.",
+    "restoreConfirm": "Overwrite & restore",
+    "restoreOk": "Restored; safeguard: {name}",
+    "restoreBanner": "Restored {n} rows; pre-restore safeguard: {safeguard}"
   }
 }

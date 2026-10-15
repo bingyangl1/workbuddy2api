@@ -583,6 +583,33 @@ export interface ChangelogResponse {
   versions: ChangelogVersion[];
 }
 
+/* ── 本地快照备份（routers/backup.py，P5）──────────────────────── */
+export interface BackupFile {
+  name: string;
+  size: number;
+  mtime: string;
+}
+export interface BackupExportResult {
+  ok: boolean;
+  name: string;
+  size: number;
+  tables: Record<string, number>;   // 每表行数
+  include_secrets: boolean;
+}
+export interface BackupPreview {
+  name: string;
+  format: number;
+  generated_at: string;
+  include_secrets: boolean;
+  tables: Record<string, number>;
+}
+export interface BackupRestoreResult {
+  ok: boolean;
+  restored: Record<string, number>;
+  skipped: string[];
+  safeguard: string;                // 恢复前自动留底的文件名
+}
+
 /* ── 鉴权（server.py::login）───────────────────────────────────── */
 export interface LoginResponse {
   token: string;

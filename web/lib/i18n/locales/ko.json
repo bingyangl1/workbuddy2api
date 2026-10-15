@@ -56,7 +56,8 @@
     "profile": "프로필",
     "redPackets": "빨간 봉투",
     "catalog": "모델 카탈로그",
-    "changelog": "변경 로그"
+    "changelog": "변경 로그",
+    "backup": "백업"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy 계정 풀 관리 · OpenAI 호환 리버스 프록시 게이트웨이",
@@ -2138,5 +2139,37 @@
     "seriesDerived": "시리즈는 이름 기반 추정값",
     "ctxCompact": "{k}K",
     "vendorLabel": "벤더"
+  },
+  "backup": {
+    "title": "백업",
+    "description": "로컬 스냅샷 내보내기 / 다운로드 / 복원(덮어쓰기 전 자동 백업)",
+    "refresh": "새로고침",
+    "fileName": "파일 이름(비우면 자동 생성)",
+    "fileNamePlaceholder": "snapshot-20261016.json",
+    "includeSecrets": "민감 정보 포함",
+    "export": "스냅샷 내보내기",
+    "secretsWarn": "민감 정보 포함 스냅샷에는 계정 자격 증명(auth_json)과 키 hash가 들어 있습니다. 파일 자체가 계정 풀과 동급입니다.",
+    "redactedHint": "마스킹 스냅샷: 자격 증명/키/IP가 자리표시자로 대체됨. 구조는 완전하나 완전 복원은 불가.",
+    "exportOk": "{name} 내보냄({n} 바이트)",
+    "noFiles": "백업이 없습니다. 위에서 내보내세요.",
+    "colName": "파일",
+    "colSize": "크기",
+    "colTime": "시간",
+    "colKind": "종류",
+    "colActions": "작업",
+    "kindAuto": "자동 백업",
+    "kindManual": "수동 내보내기",
+    "preview": "미리보기",
+    "restore": "복원",
+    "close": "닫기",
+    "cancel": "취소",
+    "format": "형식",
+    "withSecrets": "민감 정보 포함",
+    "redacted": "마스킹됨",
+    "restoreTitle": "복원하시겠습니까?",
+    "restoreDesc": "{name}이(가) 모든 업무 테이블(계정 / 키 / 사용량 / 설정)을 **덮어씁니다**. 복원 전 자동 백업을 만들고 실패 시 전체 롤백합니다.",
+    "restoreConfirm": "덮어쓰기 복원",
+    "restoreOk": "복원 완료, 백업: {name}",
+    "restoreBanner": "{n}행 복원됨. 복원 전 자동 백업: {safeguard}"
   }
 }

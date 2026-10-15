@@ -49,6 +49,10 @@ import type {
   UsageStats,
   VersionInfo,
   ChangelogResponse,
+  BackupFile,
+  BackupExportResult,
+  BackupPreview,
+  BackupRestoreResult,
 } from './types';
 
 // API 走同源根路径 /api（FastAPI 单端口把 /api /v1 /panel 挂在一起）。
@@ -362,6 +366,19 @@ export const syncApi = {
 export const systemApi = {
   version: () => get<VersionInfo>('/api/app/version'),
   changelog: () => get<ChangelogResponse>('/api/app/changelog'),
+};
+
+/* ── 本地快照备份（routers/backup.py，P5）───────────────────────── */
+export const backupApi = {
+  list: () => get<{items: BackupFile[]}>('/api/backup/list'),
+  export: (name: string, includeSecrets: boolean) =>
+    post<BackupExportResult>('/api/backup/export', {name, include_secrets: includeSecrets}),
+  preview: (name: string) =>
+    get<BackupPreview>(`/api/backup/download/${encodeURIComponent(name)}/preview`),
+  // 恢复是覆盖式高危操作：后端会自动留底
+  restore: (name: string) =>
+    post<BackupRestoreResult>('/api/backup/restore', {name}),
+  downloadUrl: (name: string) => `/api/backup/download/${encodeURIComponent(name)}`,
 };
 
 /* ── 成长计划（routers/growth.py）──────────────────────────────── */

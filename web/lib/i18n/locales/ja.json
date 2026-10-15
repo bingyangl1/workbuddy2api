@@ -56,7 +56,8 @@
     "profile": "プロフィール",
     "redPackets": "紅包",
     "catalog": "モデル一覧",
-    "changelog": "変更履歴"
+    "changelog": "変更履歴",
+    "backup": "バックアップ"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy アカウントプール管理 · OpenAI 互換リバースプロキシゲートウェイ",
@@ -2138,5 +2139,37 @@
     "seriesDerived": "シリーズは名前からの推定値",
     "ctxCompact": "{k}K",
     "vendorLabel": "ベンダー"
+  },
+  "backup": {
+    "title": "バックアップ",
+    "description": "ローカルスナップショットの出力 / ダウンロード / 復元（上書き復元前は自動退避）",
+    "refresh": "更新",
+    "fileName": "ファイル名（空欄で自動生成）",
+    "fileNamePlaceholder": "snapshot-20261016.json",
+    "includeSecrets": "機密情報を含める",
+    "export": "スナップショット出力",
+    "secretsWarn": "機密込みのスナップショットにはアカウント資格情報（auth_json）とキー hash が含まれます。ファイル自体がアカウントプール相当です。",
+    "redactedHint": "マスク済みスナップショット：資格情報/キー/IP はプレースホルダー。構造は完全でレビュー向け（完全復元は不可）。",
+    "exportOk": "{name} を出力しました（{n} バイト）",
+    "noFiles": "バックアップがありません。上で出力してください。",
+    "colName": "ファイル",
+    "colSize": "サイズ",
+    "colTime": "時刻",
+    "colKind": "種別",
+    "colActions": "操作",
+    "kindAuto": "自動退避",
+    "kindManual": "手動出力",
+    "preview": "プレビュー",
+    "restore": "復元",
+    "close": "閉じる",
+    "cancel": "キャンセル",
+    "format": "形式",
+    "withSecrets": "機密込み",
+    "redacted": "マスク済み",
+    "restoreTitle": "復元しますか？",
+    "restoreDesc": "{name} は全業務テーブル（アカウント / キー / 使用量 / 設定）を**上書き**します。復元前に自動退避を作成し、失敗時は全体ロールバックします。",
+    "restoreConfirm": "上書き復元",
+    "restoreOk": "復元完了、退避：{name}",
+    "restoreBanner": "{n} 行を復元しました。復元前の自動退避：{safeguard}"
   }
 }

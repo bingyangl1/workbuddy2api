@@ -56,7 +56,8 @@
     "profile": "個人資訊",
     "redPackets": "紅包",
     "catalog": "模型中心",
-    "changelog": "更新日誌"
+    "changelog": "更新日誌",
+    "backup": "資料備份"
   },
   "login": {
     "subtitle": "騰訊 CodeBuddy 帳號池管理 · OpenAI 相容反向代理閘道",
@@ -2138,5 +2139,37 @@
     "seriesDerived": "系列為按名稱推導值",
     "ctxCompact": "{k}K",
     "vendorLabel": "廠商"
+  },
+  "backup": {
+    "title": "資料備份",
+    "description": "本機快照匯出 / 下載 / 還原（覆蓋式還原前自動留底）",
+    "refresh": "重新整理",
+    "fileName": "檔案名稱（可留空自動產生）",
+    "fileNamePlaceholder": "snapshot-20261016.json",
+    "includeSecrets": "包含敏感憑證",
+    "export": "匯出快照",
+    "secretsWarn": "含密快照包含帳號憑證（auth_json）與金鑰 hash——檔案本身等同帳號池，請妥善保管。",
+    "redactedHint": "脫敏快照：憑證/金鑰/IP 已替換為佔位符，結構完整，適合評審（不能用於還原完整功能）。",
+    "exportOk": "已匯出 {name}（{n} 位元組）",
+    "noFiles": "尚無備份檔案。上方匯出即可建立第一份。",
+    "colName": "檔案",
+    "colSize": "大小",
+    "colTime": "時間",
+    "colKind": "類型",
+    "colActions": "操作",
+    "kindAuto": "還原留底",
+    "kindManual": "手動匯出",
+    "preview": "預覽",
+    "restore": "還原",
+    "close": "關閉",
+    "cancel": "取消",
+    "format": "格式",
+    "withSecrets": "含憑證",
+    "redacted": "已脫敏",
+    "restoreTitle": "確認還原？",
+    "restoreDesc": "{name} 將**覆蓋**當前全部業務表（帳號 / 金鑰 / 用量 / 設定）。後端會在還原前自動留底一份 pre-restore 檔案，失敗則整體回滾。",
+    "restoreConfirm": "覆蓋式還原",
+    "restoreOk": "還原完成，留底：{name}",
+    "restoreBanner": "已還原 {n} 行資料；還原前自動留底：{safeguard}"
   }
 }
