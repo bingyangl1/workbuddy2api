@@ -49,8 +49,11 @@ import type {
   VersionInfo,
 } from './types';
 
+// API 走同源根路径 /api（FastAPI 单端口把 /api /v1 /panel 挂在一起）。
+// 不能用 BASE_PATH 作 baseURL：BASE_PATH 是面板页面前缀（/panel），
+// API 不在它下面——否则 /api/accounts 会被拼成 /panel/api/accounts 404。
 export const http = axios.create({
-  baseURL: BASE_PATH,
+  baseURL: '',
   timeout: 60000,
 });
 
@@ -268,7 +271,8 @@ export const logApi = {
     Object.entries(params || {}).forEach(([k, v]) => {
       if (v != null && v !== '') qs.set(k, String(v));
     });
-    return `${BASE_PATH}/api/logs/export${qs.toString() ? `?${qs}` : ''}`;
+    // 同源 API（/api），不加面板前缀——与 baseURL 口径一致
+    return `/api/logs/export${qs.toString() ? `?${qs}` : ''}`;
   },
 };
 

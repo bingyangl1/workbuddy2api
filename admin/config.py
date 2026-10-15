@@ -76,6 +76,19 @@ class Settings:
     #: 本地排障要看文档时设 `ADMIN_ENABLE_DOCS=1`。
     ENABLE_DOCS = os.getenv("ADMIN_ENABLE_DOCS", "0") == "1"
 
+    # ---------- 新面板静态托管（Phase 3 收尾） ----------
+    #: 新面板（web/ Next.js 静态导出产物）是否由 FastAPI 同源托管。
+    #: 默认关闭：平价验证期间继续用 `web` 目录的 `npm run dev`（3000 端口）；
+    #: 设 `ADMIN_PANEL_STATIC=1` 后，FastAPI 在 `PANEL_PATH`（默认 /panel）
+    #: 挂载 `web/out` 静态产物，与 /api /v1 /gw 同端口（8790）单进程交付。
+    #: 前提是已先 `cd web && NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel
+    #: npm run build` 产出 web/out（basePath 必须与 PANEL_PATH 一致）。
+    PANEL_STATIC = os.getenv("ADMIN_PANEL_STATIC", "0") == "1"
+    #: 新面板挂载路径（不含尾部斜杠）。与构建时 NEXT_PUBLIC_BASE_PATH 一致。
+    PANEL_PATH = os.getenv("ADMIN_PANEL_PATH", "/panel").rstrip("/") or "/panel"
+    #: 静态产物目录（相对 admin/ 的上级，即仓库根的 web/out）。
+    PANEL_DIR = os.path.join(_ROOT, "web", "out")
+
     # /v1/messages（Anthropic Messages API）的模型档次映射。
     # Claude Code 发的是 claude-opus-* / claude-sonnet-* / claude-haiku-* 这类名字，
     # 上游不认；这里按档次落到本后台白名单里的模型名。

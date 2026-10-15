@@ -372,6 +372,29 @@ def join_index():
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# ── 新面板静态托管（Phase 3 收尾，PANEL_STATIC 默认关）────────────────
+# 设 ADMIN_PANEL_STATIC=1 后，把 web/out 静态导出产物挂在 PANEL_PATH
+# （默认 /panel）。产物须以 NEXT_PUBLIC_BASE_PATH=<PANEL_PATH> 构建，
+# 否则内部 /_next 资源引用缺前缀会 404。
+#
+# trailingSlash:true 的导出产物是「每页一个目录 + index.html」，所以
+# StaticFiles(html=True) 会把 /panel/dashboard/ 映射到 out/dashboard/index.html，
+# 对 /panel/dashboard（无尾斜杠）返回 301 补斜杠——Next 客户端路由
+# （next/link 跳转）本就带尾斜杠，浏览器直达无斜杠路径也被 301 接管。
+_PANEL_DIR = Path(settings.PANEL_DIR)
+if settings.PANEL_STATIC:
+    if _PANEL_DIR.is_dir() and (_PANEL_DIR / "index.html").is_file():
+        app.mount(settings.PANEL_PATH,
+                  StaticFiles(directory=str(_PANEL_DIR), html=True),
+                  name="panel")
+        logging.getLogger(__name__).info(
+            "新面板已挂载：%s → %s", settings.PANEL_PATH, _PANEL_DIR)
+    else:
+        logging.getLogger(__name__).warning(
+            "ADMIN_PANEL_STATIC=1 但未找到面板产物 %s（缺 index.html）——"
+            "先 cd web && NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=%s npm run build",
+            _PANEL_DIR, settings.PANEL_PATH)
+
 # 内嵌 converter 网关到 /gw 前缀（单端口部署）。设置脱敏与日志路径以对齐独立运行时的行为。
 if _CONVERTER_EMBEDDED:
     import os
