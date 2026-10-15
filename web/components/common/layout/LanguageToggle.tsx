@@ -33,7 +33,8 @@ export function LanguageToggle({className}: {className?: string}) {
         )}
       >
         <Languages className="h-3 w-3 shrink-0 opacity-70" />
-        <SelectValue />
+        {/* 窄屏（<sm）只显图标：语言名（如「简体中文」）在 375px 会挤爆顶栏 */}
+        <span className="hidden sm:contents"><SelectValue /></span>
       </SelectTrigger>
       <SelectContent>
         {locales.map((id) => (
