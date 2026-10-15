@@ -99,6 +99,7 @@ _UPSTREAM_WRITE_ROUTES = (
     "/api/accounts/cat-travel",          # 猫猫旅行（单个 + batch + batch-async）
     "/api/models/sync",                  # 从上游同步模型列表
     "/api/models/speed-test",            # 真实流式请求测速（占账号）
+    "/api/playground/chat",              # 测试台直调（真实消耗积分，走号池选号）
 )
 #: accounts 下带 id 的上游写：/{id}/refresh、/{id}/inject、/{id}/cat-travel
 _UPSTREAM_WRITE_ACCOUNT_SUB = ("/refresh", "/inject", "/cat-travel")

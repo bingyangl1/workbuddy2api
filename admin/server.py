@@ -18,8 +18,8 @@ from admin.db import SessionLocal, init_db, wait_database_ready
 from admin.models import SystemSetting
 from admin.routers import (account_groups, accounts, app_source, audit,
                            client_profile, credits, groups, growth, keys,
-                           login as login_router, logs, models, proxy, schedules,
-                           security as security_router, stats, sync, tokens)
+                           login as login_router, logs, models, playground, proxy,
+                           schedules, security as security_router, stats, sync, tokens)
 from admin.ratelimit import (clear_failures, get_client_ip, get_trusted_client_ip,
                              is_locked, record_failure)
 from admin.security import (
@@ -134,6 +134,7 @@ app.add_middleware(GatewayAdmissionMiddleware)
 app.include_router(accounts.router)
 app.include_router(keys.router)
 app.include_router(models.router)
+app.include_router(playground.router)  # P4：聊天测试台（admin 免密钥直调）
 app.include_router(proxy.router)
 app.include_router(sync.router)
 app.include_router(schedules.router)
