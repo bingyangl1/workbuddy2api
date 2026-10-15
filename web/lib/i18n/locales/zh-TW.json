@@ -54,7 +54,8 @@
     "settings": "設定",
     "quickAdd": "快速新增",
     "profile": "個人資訊",
-    "redPackets": "紅包"
+    "redPackets": "紅包",
+    "catalog": "模型中心"
   },
   "login": {
     "subtitle": "騰訊 CodeBuddy 帳號池管理 · OpenAI 相容反向代理閘道",
@@ -2123,5 +2124,40 @@
     "run": "做任務",
     "colStatus": "狀態",
     "colProgress": "進度"
+  },
+  "catalog": {
+    "title": "模型中心",
+    "description": "按版本直連騰訊模型目錄：顯示名 / 描述 / 上下文 / 推理檔位 / 積分倍率 / 能力標記",
+    "source": "資料來源",
+    "refresh": "重新整理",
+    "refreshing": "重新整理中…",
+    "search": "搜尋模型 / 描述 / 標籤…",
+    "filterCapability": "能力篩選",
+    "capAll": "全部",
+    "capReasoning": "推理",
+    "capImages": "多模態",
+    "capToolCall": "工具調用",
+    "capFree": "免費",
+    "sortSeries": "按系列",
+    "sortMultiplier": "按倍率",
+    "sortContext": "按上下文",
+    "colModel": "模型",
+    "colContext": "上下文",
+    "colMaxOutput": "最大輸出",
+    "colEfforts": "推理檔位",
+    "colMultiplier": "積分倍率",
+    "colCapability": "能力",
+    "colStatus": "狀態",
+    "free": "免費",
+    "enabled": "已啟用",
+    "disabled": "已停用",
+    "notInConfig": "未入庫",
+    "cachedHint": "快取",
+    "secondsAgo": "{n} 秒前",
+    "noModels": "暫無模型資料",
+    "effortDefault": "預設",
+    "seriesDerived": "系列為按名稱推導值",
+    "ctxCompact": "{k}K",
+    "vendorLabel": "廠商"
   }
 }

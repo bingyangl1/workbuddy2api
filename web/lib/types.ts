@@ -358,6 +358,47 @@ export interface ModelHealth {
   latency_sample_count: number;
 }
 
+/* ── 模型中心目录（routers/models.py::model_catalog）───────────────── */
+/** 单个模型目录条目：腾讯元数据 + 本地 ModelConfig 倍率/启停合并 */
+export interface CatalogModel {
+  id: string;
+  name: string;
+  description: string;
+  context_length: number;
+  max_output_tokens: number;
+  efforts: string[];               // 支持的推理档位（空 = 不推理/未声明）
+  default_effort: string;          // 空 = 未声明
+  can_disable_thinking: boolean;
+  supports_reasoning: boolean;
+  supports_images: boolean;
+  supports_tool_call: boolean;
+  only_reasoning: boolean;
+  reasoning_summary: string;
+  tags: string[];
+  vendor: string;
+  series: string;                  // 系列（按 id 前缀推导，UI 标明推导值）
+  is_default: boolean;
+  disabled_multimodal: boolean;
+  // 本地 ModelConfig 合并字段
+  credit_multiplier: number;
+  credits_raw: string;
+  enabled: boolean;
+  is_free: boolean;
+  in_local_config: boolean;
+}
+
+export interface ModelCatalogResponse {
+  models: CatalogModel[];
+  source: 'tencent' | 'upstream' | 'none';
+  source_label: string;
+  via: string;
+  errors: string[];
+  cached: boolean;
+  cache_age: number;
+  realm: string;
+  fetched_at?: number;
+}
+
 /* ── 积分（routers/credits.py）──────────────────────────────────── */
 /** credits/expiry 单个积分包（精简字段） */
 export interface CreditPackage {

@@ -54,7 +54,8 @@
     "settings": "設定",
     "quickAdd": "クイック追加",
     "profile": "プロフィール",
-    "redPackets": "紅包"
+    "redPackets": "紅包",
+    "catalog": "モデル一覧"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy アカウントプール管理 · OpenAI 互換リバースプロキシゲートウェイ",
@@ -2123,5 +2124,40 @@
     "run": "タスク実行",
     "colStatus": "ステータス",
     "colProgress": "進捗"
+  },
+  "catalog": {
+    "title": "モデルカタログ",
+    "description": "バージョン別に Tencent モデルカタログへ直连：表示名 / 説明 / コンテキスト / 推論档位 / クレジット倍率 / 能力タグ",
+    "source": "ソース",
+    "refresh": "更新",
+    "refreshing": "更新中…",
+    "search": "モデル / 説明 / タグを検索…",
+    "filterCapability": "能力フィルタ",
+    "capAll": "すべて",
+    "capReasoning": "推論",
+    "capImages": "マルチモーダル",
+    "capToolCall": "ツール呼出",
+    "capFree": "無料",
+    "sortSeries": "シリーズ順",
+    "sortMultiplier": "倍率順",
+    "sortContext": "コンテキスト順",
+    "colModel": "モデル",
+    "colContext": "コンテキスト",
+    "colMaxOutput": "最大出力",
+    "colEfforts": "推論档位",
+    "colMultiplier": "倍率",
+    "colCapability": "能力",
+    "colStatus": "状態",
+    "free": "無料",
+    "enabled": "有効",
+    "disabled": "無効",
+    "notInConfig": "未登録",
+    "cachedHint": "キャッシュ",
+    "secondsAgo": "{n} 秒前",
+    "noModels": "モデルデータなし",
+    "effortDefault": "既定",
+    "seriesDerived": "シリーズは名前からの推定値",
+    "ctxCompact": "{k}K",
+    "vendorLabel": "ベンダー"
   }
 }

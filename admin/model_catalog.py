@@ -155,7 +155,9 @@ def _build(db: Session, realm: str) -> dict:
                 "models": _decorate(raw, realm),
                 "source": "tencent",
                 "source_label": "腾讯模型接口（含显示名 / 描述 / 推理档位）",
-                "via": acc.name or acc.uid or "",
+                # via 不返回账号名/uid——模型中心页不该暴露「用哪个账号拉的」，
+                # 那是账号标识（uid/昵称/邮箱），对用户无价值且属隐私。
+                "via": "",
                 "errors": errors,
             }
         errors.append(f"{acc.name or acc.uid}: 返回为空")

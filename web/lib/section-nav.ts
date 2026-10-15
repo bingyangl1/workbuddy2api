@@ -91,6 +91,7 @@ export const SECTION_NAV: Record<SectionKey, readonly SectionNavItem[]> = {
   ],
   models: [
     {key: 'models', href: '/models', labelKey: 'nav.models', iconKey: 'models'},
+    {key: 'catalog', href: '/models/catalog', labelKey: 'nav.catalog', iconKey: 'models'},
     {key: 'playground', href: '/playground', labelKey: 'nav.playground', iconKey: 'playground'},
   ],
 };

@@ -35,6 +35,7 @@ import type {
   LoginResponse,
   LogSummary,
   ModelBusyResponse,
+  ModelCatalogResponse,
   ModelConfig,
   ModelGroup,
   ModelHealth,
@@ -235,6 +236,9 @@ export const modelApi = {
   // 契约返回 {total_fetched, added, updated, total_in_db, enabled}
   sync: () => post<{total_fetched: number; added: number; updated: number; total_in_db: number; enabled: number}>('/api/models/sync'),
   busy: () => get<ModelBusyResponse>('/api/models/busy'),
+  // 模型中心目录（P4）：按 realm 直连腾讯，含 source 来源标注
+  catalog: (realm: string = 'cn', force = false) =>
+    get<ModelCatalogResponse>('/api/models/catalog', {realm, ...(force ? {force: true} : {})}),
   // 契约：{model, max_tokens?, messages?} → SpeedTestResult（真实上游请求，约 2-10s）
   speedTest: (model: string, max_tokens = 256) =>
     post<SpeedTestResult>('/api/models/speed-test', {model, max_tokens}),

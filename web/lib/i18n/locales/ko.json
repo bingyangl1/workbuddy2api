@@ -54,7 +54,8 @@
     "settings": "설정",
     "quickAdd": "빠른 추가",
     "profile": "프로필",
-    "redPackets": "빨간 봉투"
+    "redPackets": "빨간 봉투",
+    "catalog": "모델 카탈로그"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy 계정 풀 관리 · OpenAI 호환 리버스 프록시 게이트웨이",
@@ -2123,5 +2124,40 @@
     "run": "작업 실행",
     "colStatus": "상태",
     "colProgress": "진행"
+  },
+  "catalog": {
+    "title": "모델 카탈로그",
+    "description": "버전별 Tencent 모델 카탈로그 직접 연결: 표시 이름 / 설명 / 컨텍스트 / 추론 강도 / 크레딧 배율 / 기능 표시",
+    "source": "소스",
+    "refresh": "새로고침",
+    "refreshing": "새로고침 중…",
+    "search": "모델 / 설명 / 태그 검색…",
+    "filterCapability": "기능 필터",
+    "capAll": "전체",
+    "capReasoning": "추론",
+    "capImages": "멀티모달",
+    "capToolCall": "도구 호출",
+    "capFree": "무료",
+    "sortSeries": "시리즈순",
+    "sortMultiplier": "배율순",
+    "sortContext": "컨텍스트순",
+    "colModel": "모델",
+    "colContext": "컨텍스트",
+    "colMaxOutput": "최대 출력",
+    "colEfforts": "추론 강도",
+    "colMultiplier": "배율",
+    "colCapability": "기능",
+    "colStatus": "상태",
+    "free": "무료",
+    "enabled": "활성",
+    "disabled": "비활성",
+    "notInConfig": "미등록",
+    "cachedHint": "캐시",
+    "secondsAgo": "{n}초 전",
+    "noModels": "모델 데이터 없음",
+    "effortDefault": "기본",
+    "seriesDerived": "시리즈는 이름 기반 추정값",
+    "ctxCompact": "{k}K",
+    "vendorLabel": "벤더"
   }
 }

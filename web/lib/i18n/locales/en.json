@@ -54,7 +54,8 @@
     "settings": "Settings",
     "quickAdd": "Quick add",
     "profile": "Profile",
-    "redPackets": "Red packets"
+    "redPackets": "Red packets",
+    "catalog": "Catalog"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy account pool console · OpenAI-compatible gateway",
@@ -2147,5 +2148,40 @@
     "run": "Run tasks",
     "colStatus": "Status",
     "colProgress": "Progress"
+  },
+  "catalog": {
+    "title": "Model Catalog",
+    "description": "Per-realm Tencent model catalog: display name / description / context / reasoning efforts / credit multiplier / capabilities",
+    "source": "Source",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "search": "Search models / descriptions / tags…",
+    "filterCapability": "Capability",
+    "capAll": "All",
+    "capReasoning": "Reasoning",
+    "capImages": "Multimodal",
+    "capToolCall": "Tool call",
+    "capFree": "Free",
+    "sortSeries": "By series",
+    "sortMultiplier": "By multiplier",
+    "sortContext": "By context",
+    "colModel": "Model",
+    "colContext": "Context",
+    "colMaxOutput": "Max output",
+    "colEfforts": "Efforts",
+    "colMultiplier": "Multiplier",
+    "colCapability": "Capabilities",
+    "colStatus": "Status",
+    "free": "Free",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "notInConfig": "Not synced",
+    "cachedHint": "Cached",
+    "secondsAgo": "{n}s ago",
+    "noModels": "No model data",
+    "effortDefault": "default",
+    "seriesDerived": "Series is name-derived",
+    "ctxCompact": "{k}K",
+    "vendorLabel": "Vendor"
   }
 }

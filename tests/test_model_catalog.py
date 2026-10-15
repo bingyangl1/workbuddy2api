@@ -134,6 +134,8 @@ class CatalogCacheCase(unittest.TestCase):
             self.assertEqual(r1["source"], "tencent")
             self.assertFalse(r1["cached"])
             self.assertEqual(len(r1["models"]), 3)
+            # via 不返回账号标识（uid/昵称/邮箱）——模型中心页不暴露「用哪个账号拉的」
+            self.assertEqual(r1["via"], "")
             # 第二次命中缓存（fetch_models 仍只调 1 次）
             r2 = self.mc.catalog(self.factory(), realm="cn")
             self.assertTrue(r2["cached"])

@@ -54,7 +54,8 @@
     "settings": "设置",
     "quickAdd": "快速添加",
     "profile": "个人信息",
-    "redPackets": "红包"
+    "redPackets": "红包",
+    "catalog": "模型中心"
   },
   "login": {
     "subtitle": "腾讯 CodeBuddy 账号池管理 · OpenAI 兼容反代网关",
@@ -1914,5 +1915,40 @@
     "run": "做任务",
     "colStatus": "状态",
     "colProgress": "进度"
+  },
+  "catalog": {
+    "title": "模型中心",
+    "description": "按版本直连腾讯模型目录：显示名 / 描述 / 上下文 / 推理档位 / 积分倍率 / 能力标记",
+    "source": "数据来源",
+    "refresh": "刷新",
+    "refreshing": "刷新中…",
+    "search": "搜索模型 / 描述 / 标签…",
+    "filterCapability": "能力筛选",
+    "capAll": "全部",
+    "capReasoning": "推理",
+    "capImages": "多模态",
+    "capToolCall": "工具调用",
+    "capFree": "免费",
+    "sortSeries": "按系列",
+    "sortMultiplier": "按倍率",
+    "sortContext": "按上下文",
+    "colModel": "模型",
+    "colContext": "上下文",
+    "colMaxOutput": "最大输出",
+    "colEfforts": "推理档位",
+    "colMultiplier": "积分倍率",
+    "colCapability": "能力",
+    "colStatus": "状态",
+    "free": "免费",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "notInConfig": "未入库",
+    "cachedHint": "缓存",
+    "secondsAgo": "{n} 秒前",
+    "noModels": "暂无模型数据",
+    "effortDefault": "默认",
+    "seriesDerived": "系列为按名称推导值",
+    "ctxCompact": "{k}K",
+    "vendorLabel": "厂商"
   }
 }
