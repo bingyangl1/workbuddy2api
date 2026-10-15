@@ -68,8 +68,12 @@ docs/
 # ===== 逆向取证 / 本地诊断脚本（不提交） =====
 # 这些脚本依赖本机安装包、真实账号、一次性排查结论（有的还含已被证伪的假设），
 # 属于本地工具而非产品代码，一律不上传。
+# 例外：产品级脚本（打包 / 更新 / 安全基线）必须入库。
 # scripts/daemon.ps1 是部署脚本，保留。
 scripts/*.py
+!scripts/build_desktop.py
+!scripts/update.py
+!scripts/security_baseline.py
 
 # ===== 强制保留（即便以点开头也要提交） =====
 !.gitignore
