@@ -1,6 +1,9 @@
 /* Release text is always inserted as textContent, never interpreted as HTML. */
 window.WBDesktop = (() => {
   let native = false, initialized = false, checking = false, releases = null, dialog, poll;
+  // 允许跳转的 Releases 前缀：由 /api/app/version 下发（权威来源 = desktop/version.json），
+  // 不再硬编码 owner/repo —— fork 换仓库后旧硬编码会让「打开 Releases」按钮消失。
+  let allowedReleasePrefix = '';
   const versionButton = () => document.getElementById('appVersion');
   const element = (tag, text, className) => {
     const el = document.createElement(tag);
@@ -14,7 +17,7 @@ window.WBDesktop = (() => {
   };
   const link = (text, url) => {
     const el = element('a', text);
-    if (/^https:\/\/github\.com\/xiaofan6ya\/workbuddy2api\/releases(?:\/|$)/.test(url)) {
+    if (allowedReleasePrefix && url.startsWith(allowedReleasePrefix)) {
       el.href = url; el.target = '_blank'; el.rel = 'noopener noreferrer';
     }
     return el;
@@ -56,7 +59,10 @@ window.WBDesktop = (() => {
     dialog.append(header, element('p', `当前版本 v${releases?.version || '…'} · 更新由你决定`, 'wb-update-meta'));
     if (releases?.error) dialog.append(element('p', releases.error, 'wb-update-meta'));
     const actions = element('div', undefined, 'wb-update-actions');
-    actions.append(button('重新检查', () => check()), link('打开 Releases', 'https://github.com/xiaofan6ya/workbuddy2api/releases'));
+    const releasesUrl = releases?.releases_url || '';
+    if (releasesUrl) allowedReleasePrefix = releasesUrl;
+    actions.append(button('重新检查', () => check()));
+    if (releasesUrl) actions.append(link('打开 Releases', releasesUrl));
     const latest = releases?.latest;
     if (native && latest?.installable) {
       const download = button('下载更新', async () => {

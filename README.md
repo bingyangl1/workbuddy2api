@@ -2,6 +2,8 @@
 
 > ## 关于本 fork
 >
+> **本仓库**：<https://github.com/bingyangl1/workbuddy2api>
+>
 > 本仓库是 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的演进 fork，
 > 在保留上游「OpenAI/Anthropic 兼容反代 + 账号池自动化运营」全部能力的基础上，
 > 吸收了 [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager)（MIT）的运营优势。
@@ -10,7 +12,10 @@
 >
 > - **国际版 realm 双域**：CN / Global（workbuddy.ai）端点分派、模型 `cn:`/`global:` 前缀路由、密钥版本隔离、任务按 realm 门控
 > - **密钥运营面**：每密钥全维度（有效期 / 最大 IP 数 / IP 白名单 / Token 配额）、`/v1/usage` 自查、入站 IP 治理、模型别名、只读管理 Token、操作审计、账号池分组隔离
-> - **面板现代化**：Next.js 15 静态导出 + shadcn/ui + 五语言 i18n（逐步替换旧 HTML 面板）
+> - **面板现代化（P3 完成）**：`web/` Next.js 15 静态导出 + shadcn/ui + Tailwind v4 + 五语言 i18n（zh-CN/zh-TW/en/ja/ko），**14/14 页面 parity**；FastAPI 同源托管 `/panel`，旧面板保留 `/admin-legacy` 并用 `ADMIN_DEFAULT_PANEL` 切换默认；深浅色跟随系统 + 手动切换、移动端 375px 响应式；`ADMIN_UPSTREAM_READONLY` 测试护栏防测试误伤账号
+> - **模型中心（P4 完成）**：按 realm 直连腾讯模型目录（显示名 / 描述 / 上下文 / 最大输出 / 推理档位 / 积分倍率 / 能力标记），回退上游清单并**如实标注来源**；`/panel/models/catalog` 按系列分组、搜索、能力筛选、排序浏览
+> - **聊天测试台（P4 完成）**：管理员免密钥直调真实模型，**走同一号池状态机**（选号 / 在途租约 / 错误分类 / 记账一份实现），记账口径与 `/v1` 一致（`key_id=0` + `use_case=playground` 区分）；流式可中断、右下角实时显示本次积分消耗
+> - **备份与更新（P5 完成）**：本地快照备份/恢复（全 15 张业务表，恢复前自动留底、单事务回滚、含密/脱敏双模式）；`scripts/update.py` 一键更新（三模式，**先验签后解压**，OpenSSH 签名）；`scripts/security_baseline.py` 更新后自动重施安全基线；`/panel/changelog` 离线更新日志查看器
 >
 > **署名链（MIT）**：Sliverkiss/workbuddy2api → ithtelab/workbuddy-manager → linux-do/cdk（UI 设计令牌）。详见 [LICENSE](LICENSE) 的 Third-party notices。
 >
@@ -26,7 +31,7 @@
 
 把 **WorkBuddy / CodeBuddy（腾讯代码助手）** 的桌面端登录态，转成你本机 / 局域网可直接使用的 **OpenAI / Anthropic 兼容 API**，并提供一个 **多账号代理共享 + 自动化运营平台**。
 
-**Windows 桌面版**：下载 [Releases](https://github.com/xiaofan6ya/workbuddy2api/releases) 中的 EXE，双击直接进入，无需配置 Python、MySQL 或后台登录。内置项目依赖，自动准备 Node/WebView2，支持检查更新与选择升级。构建、数据目录与发布说明见 [desktop/README.md](desktop/README.md)。
+**Windows 桌面版**：下载 [Releases](https://github.com/bingyangl1/workbuddy2api/releases) 中的 EXE，双击直接进入，无需配置 Python、MySQL 或后台登录。内置项目依赖，自动准备 Node/WebView2，支持检查更新与选择升级。构建、数据目录与发布说明见 [desktop/README.md](desktop/README.md)。
 
 ## 它是什么
 
@@ -307,6 +312,56 @@ WORKBUDDY_VERSION              # 默认 2.0.0
 - **定时调度**：内置调度器，签到 / 刷余额 / 同步模型列表 / 拉取成长任务列表均可按间隔自动跑，后台可增删改查与「立即运行」。**运行结果是人话摘要**（今天签到领了多少积分、哪个账号没成功、原因是什么），不是一坨 JSON —— 见 [3.8](#38-定时任务结果人话摘要)
 
 > 自动化请求全部走**正常业务接口**（正常 200 响应、免费模型、最小输出），不伪造畸形请求，详见 [6.4](#64-为什么不用直接发完成包--直接发事件)。
+
+**现代化面板（`web/`，New）**
+
+旧面板（`admin/static/index.html`，125 条路由的原始实现）保留在 **`/admin-legacy`**；
+新面板是 Next.js 15 静态导出，由 FastAPI **同源托管**在 `/panel`（无需另起 Node 服务）：
+
+- **14 个页面 parity**：仪表盘 / 账号池 / 密钥 / 模型 / 用量日志 / 使用统计 / 安全治理 / 操作审计 /
+  账号分组 / 积分统计 / 访问令牌 / 定时任务 / 成长计划 / 系统设置
+- **五语言 i18n**：zh-CN / zh-TW / en / ja / ko，跟随浏览器并可在右上角手动切换
+- **深浅色**：跟随系统 + 顶栏手动切换
+- **移动端响应式**：375px 起完整可用（顶栏控件自动收敛为图标）
+- **版本切换**：右上角国内版 / 国际版全局切换（影响账号、模型、测试台与扫码登录端点）
+- **默认面板切换**：`ADMIN_DEFAULT_PANEL=legacy|next`（平价验收 100% 前保持 legacy）
+
+启用方式：
+
+```bash
+cd web && NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel npm run build   # 产物在 web/out/
+# .env 里设：ADMIN_PANEL_STATIC=1
+```
+
+**模型中心（`/panel/models/catalog`）**：按 realm 直连腾讯模型目录，显示名 / 描述 / 上下文 /
+最大输出 / **推理档位** / 积分倍率 / 能力标记（推理 · 多模态 · 工具调用），按系列分组、搜索、
+能力筛选、按倍率或上下文排序；数据来源在页面上**如实标注**（腾讯目录 / 上游回退）。倍率与启停
+来自本地模型白名单，两者合并展示。
+
+**聊天测试台（`/panel/playground`）**：管理员**免密钥**直调真实模型，走**同一号池状态机**
+（选号 / 在途租约 / 错误分类 / 记账一份实现）——记账口径与 `/v1` 完全一致，落在同一张
+`usage_logs`，用 `key_id=0` + `use_case=playground` 与密钥调用区分。支持真实模型选择、
+思考强度（只列该模型支持的档位）、流式渲染与中断、右下角实时显示本次消耗积分
+（上游未返回积分时显示 `—`，与「扣了 0」区分）。
+
+**数据备份（`/panel/backup`）**：本地快照导出 / 下载 / 预览 / 恢复。快照覆盖全部 15 张业务表；
+**恢复是覆盖式且单事务**（失败整体回滚），并在恢复前**自动留底** `pre-restore-<时间戳>.json`。
+支持「含密」（完整可恢复，含账号凭据，页面会醒目警告）与「脱敏」（凭据 / 密钥 / IP 换成占位符，
+结构完整，适合评审）两种模式；导出与恢复都写操作审计。
+
+**更新日志（`/panel/changelog`）**：离线读取部署目录 `CHANGELOG.md`，按版本折叠、标记当前版本，
+无需联网。
+
+**一键更新（`scripts/update.py`）**：三种模式（全部 / 仅引擎源码 / 仅面板产物），
+**先验签后解压**——签名缺失、包被篡改、公钥不匹配一律**拒绝安装**；解压走模式白名单并拒绝
+路径穿越；覆盖前逐个留底 `.bak-<时间戳>`；更新后自动重施安全基线（`scripts/security_baseline.py`）。
+
+**测试护栏（`ADMIN_UPSTREAM_READONLY=1`）**：把所有**会真实触达上游的写操作**（做成长任务 /
+领奖 / 强制刷新余额 / 测速 / 同步模型列表 / 猫猫旅行 / 定时任务立即运行 / 测试台直调）统一拦成
+`403`。本机测试、面板核验、CI 时开着它，就不会没轻没重地把号打限流甚至封号。**生产必须为 0。**
+
+**开发假数据（`dev/seed_fixtures.py`）**：无账号环境下往本地 SQLite 灌确定性假数据
+（10 账号 / 30 模型 / 3 密钥 / 225 条用量日志），让新面板每页都有内容可看，**零上游触达**。
 
 ### 3.2 稳定性设计
 
@@ -1502,14 +1557,29 @@ workbuddy2api/
 ├── start_converter.bat       # 本机直连网关一键启动（本地用，不进仓库）
 ├── start_admin.bat           # 管理后台一键启动（强密码 + 固定 JWT secret；本地用，不进仓库）
 ├── requirements.txt / Dockerfile / docker-compose.yml
-├── scripts/                  # 部署脚本 + 本地诊断脚本（*.py 被 .gitignore 忽略，不进仓库）
-│   └── daemon.ps1                       # 部署用守护脚本（**保留在仓库内**）
+├── scripts/                  # 平台/部署脚本（产品级，进仓库）
+│   ├── build_desktop.py                 # Windows x64 一键打包（含 web/out 构建）
+│   ├── update.py                        # 一键更新：先验签后解压 + 重施基线
+│   ├── security_baseline.py             # 安全基线审计/收敛（更新后必跑）
+│   ├── watchdog.sh                      # Linux 看门狗（健康检查失败自动拉起）
+│   └── daemon.ps1                       # Windows 部署用守护脚本
+├── web/                      # 现代化面板（Next.js 15 静态导出 + shadcn/ui + Tailwind v4）
+│   ├── app/(main)/           # 仪表盘 / 账号 / 密钥 / 模型 / 模型中心 / 测试台 / 日志 / 统计 /
+│   │                         #   积分 / 安全 / 审计 / 令牌 / 分组 / 定时任务 / 成长 / 设置 /
+│   │                         #   数据备份 / 更新日志
+│   ├── components/           # UI 组件（shadcn/ui + 自定义 layout/common）
+│   ├── lib/                  # typed API client / types / i18n（5 语言）/ realm / auth / theme
+│   └── out/                  # 静态导出产物（构建生成，gitignore）
+├── dev/
+│   └── seed_fixtures.py      # 面板开发假数据种子（零上游触达，SQLite）
 ├── admin/                    # 多账号管理后台（FastAPI + MySQL + Redis）
-│   ├── server.py             # FastAPI 入口、登录、静态页挂载、converter 挂 /gw
+│   ├── server.py             # FastAPI 入口、登录、静态页挂载（/admin-legacy + /panel）、converter 挂 /gw
 │   ├── config.py             # 配置（环境变量覆盖）
 │   ├── db.py                 # SQLAlchemy 引擎 / 会话 / 建库建表 / 列迁移
-│   ├── models.py             # Account / AccountModelCooldown / ApiKey / UsageLog / Schedule ORM
-│   ├── security.py           # JWT、Key 哈希、配额拦截
+│   ├── models.py             # Account / ApiKey / UsageLog / ModelConfig / ApiToken / AuditLog / Schedule 等 15 张表 ORM
+│   ├── security.py           # JWT、Key 哈希、配额拦截、上游写操作判定（测试护栏）
+│   ├── backup.py             # 本地快照备份/恢复核心（全表导出、单事务恢复、留底、脱敏）
+│   ├── model_catalog.py      # 模型中心目录（腾讯直连 + realm 分键缓存 + 档位/能力字段）
 │   ├── backend.py            # 复用 converter.CredentialManager 操作单账号（含签到 / 成长任务 / Ardot 画布）
 │   ├── wb_login.py           # 手机号验证登录（纯协议）：驱动 OneID 短信登录 → 自动授权 → 取客户端凭证
 │   ├── pool.py               # 流量治理原语：在途租约 / 会话粘性 / 防撞号 / WAF IP 闸 / 到期紧迫度 / 三因子加权选号
@@ -1520,20 +1590,33 @@ workbuddy2api/
 │   ├── client_profile.py     # 客户端参数档案：UA/版本号/风控头/指纹的探测→保存→生效→同步
 │   ├── wb_paths.py           # 客户端路径覆盖（安装目录/产物目录）落库并注入 wb_install
 │   ├── jobrunner.py          # 后台任务执行器（批量任务异步化 + 账号级/任务级进度轮询）
-│   ├── routers/              # accounts / app_source / client_profile / **credits** / groups / growth / keys / login / proxy / schedules / logs / stats / sync / models
+│   ├── routers/              # accounts / app_source / **backup** / client_profile / credits / groups /
+│   │                         #   growth / keys / login / logs / models / **playground** / proxy /
+│   │                         #   releases / schedules / stats / sync / tokens / audit / security
 │   └── static/
-│       ├── index.html        # 管理大屏（侧栏导航，面板状态写入 ?tab=）
-│       ├── join.html         # 公开的手机号注册页（无口令/邀请码；零 CDN、零 alert）
+│       ├── index.html        # 旧管理大屏（侧栏导航；挂在 /admin-legacy，`ADMIN_DEFAULT_PANEL=legacy` 时也是 /admin）
+│       ├── desktop.js        # 桌面版集成（pywebview 免密登录 / 更新检查）
+│       ├── join.html         # 公开的手机号注册页（零 CDN、零 alert、深浅色跟随系统）
 │       └── vendor/           # 本地化的 Tailwind 产物 + FontAwesome（含字体），断网可用
-├── tests/                    # 本地回归测试（.gitignore 忽略，不进仓库）
-│   ├── test_pool.py          # 号池治理 / 错误分类 / 200 体内错误 / 端口优先级 / 会话键 / 画布 id / SSE 聚合 / 安装发现 / 客户端参数 / 拆包 / 端口接管 / 限流码族 / 链路头族（564 项）
-│   ├── test_credits.py       # 积分到期口径 / 严格到期优先调度 / 按账号查询（81 项，不依赖网络）
-│   ├── test_e2e_db.py        # 真实库端到端：迁移 / 保活任务 / 选号链路（48 项）
-│   └── test_gateway_smoke.py # 真实上游端到端冒烟（9 项，会消耗少量积分）
+├── tests/                    # 回归测试（进仓库；`python -m pytest tests/ -q`）
+│   ├── test_pool.py          # 号池治理 / 错误分类 / 200 体内错误 / 端口优先级 / 会话键 / 画布 id / SSE 聚合 / 链路头族
+│   ├── test_credits.py       # 积分到期口径 / 严格到期优先调度 / 按账号查询
+│   ├── test_model_catalog.py # 模型中心目录（_decorate / 系列推导 / realm 分键缓存 / 路由合并）
+│   ├── test_playground.py    # 聊天测试台（校验 / 记账口径 key_id=0+playground / 错误处置 / 护栏）
+│   ├── test_backup.py        # 快照导出/恢复（脱敏 / 单事务回滚 / 路径穿越 / 保留字引用）
+│   ├── test_update.py        # 更新器（验签 / 篡改拒绝 / 缺签名拒绝 / 路径穿越 / 基线接线）
+│   ├── test_changelog.py     # Changelog 解析（版本段 / 小节 / 续行）
+│   ├── test_upstream_readonly.py # 测试护栏（上游写操作判定 + 中间件拦截）
+│   ├── test_e2e_db.py        # 真实库端到端：迁移 / 保活任务 / 选号链路
+│   └── test_gateway_smoke.py # 真实上游端到端冒烟（会消耗少量积分）
 ├── wb_install.py             # WorkBuddy 安装位置 / 版本号 / 风控配置自动发现（不写死盘符）
 ├── wb_asar.py                # 纯标准库 asar 读取/解包/搜索（无需 Node）；逆向产物自动产出
 ├── wb_envcheck.py            # 环境自检：Python/依赖/Node/桌面端/逆向产物/MySQL/Redis
 ├── turing_helper.js          # Node：调桌面端 Turing Shield SDK 取设备 token（同样自动发现）
+├── desktop/                  # Windows 桌面版（pywebview + 打包 + 更新）
+│   ├── WorkBuddy2API.spec    # PyInstaller 规格（含 web/out 面板产物）
+│   ├── version.json          # 版本号 + **本 fork 仓库地址**（驱动更新检查）
+│   └── updates.py            # 更新检查 / 下载 / SHA256 校验 / 替换
 └── README.md
 
 # 逆向产物（不在本仓库；路径因人而异，运行时由 wb_install 自动发现）
@@ -1541,11 +1624,12 @@ workbuddy2api/
 <安装目录>\resources\app.asar.unpacked\native\turing-sdk\   # 设备风控原生模块
 ```
 
-> `scripts/*.py` 与 `tests/` 都被 `.gitignore` 忽略（本地回归工具，不进仓库）。
-> 它们在本机检出里仍然可用。
+> `docs/` 与 `docs-dev/` 中的部分资料被 `.gitignore` 忽略：里面是协议逆向取证与排查记录，
+> **含未脱敏的真实手机号与 token 片段**，属于内部资料而非产品代码，不进仓库。
 >
-> `docs/` 同样被忽略：里面是协议逆向取证与排查记录，**含未脱敏的真实手机号与
-> token 片段**，属于内部资料而非产品代码。
+> `scripts/*.py` 默认忽略（本地诊断脚本），**产品级脚本已加例外入库**：
+> `build_desktop.py` / `update.py` / `security_baseline.py`。
+> `tests/` 已入库（`!tests/test_*.py` 例外），本地诊断类脚本仍在忽略之列。
 
 #### 管理大屏的面板状态：地址栏 `?tab=`
 
