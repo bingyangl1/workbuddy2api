@@ -55,7 +55,8 @@
     "quickAdd": "クイック追加",
     "profile": "プロフィール",
     "redPackets": "紅包",
-    "catalog": "モデル一覧"
+    "catalog": "モデル一覧",
+    "changelog": "変更履歴"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy アカウントプール管理 · OpenAI 互換リバースプロキシゲートウェイ",
@@ -1265,25 +1266,13 @@
     "ID": "インドネシア"
   },
   "changelog": {
-    "title": "更新履歴",
-    "unavailable": "更新履歴を利用できません",
-    "unavailableHint": "📄 更新履歴はリリースアーカイブに同梱されています（`CHANGELOG.md`）。旧バージョンから更新した場合は「システム更新」を一度実行すると補われます。ソースから実行している場合は、リポジトリ直下にこのファイルがあるか確認してください。",
-    "loadFailed": "更新履歴の読み込みに失敗しました",
-    "loading": "更新履歴を読み込み中…",
-    "currentVersionLabel": "現在 v{v}",
+    "title": "変更履歴",
+    "description": "本デプロイの変更記録（現在 v{version}）、オフライン可",
     "unreleased": "未リリース",
-    "currentVersion": "現在のバージョン",
-    "inProgress": "開発中",
-    "items": "{n} 件",
-    "thisIsCurrent": "現在実行中のバージョンです",
-    "seeAll": "すべてのバージョン: リポジトリの Releases ページをご覧ください",
-    "truncated": "最新 {n} 件のみ表示しています（全 {total} 件）。それ以前はリポジトリの Releases ページをご覧ください。",
-    "sectionSecurity": "セキュリティ",
-    "sectionAdded": "追加",
-    "sectionFixed": "修正",
-    "sectionImproved": "改善",
-    "sectionNotes": "補足",
-    "sectionPlanned": "予定"
+    "unreleasedBadge": "進行中",
+    "current": "現在の版",
+    "empty": "CHANGELOG.md が見つかりません",
+    "itemCount": "{n} 件"
   },
   "updatePanel": {
     "currentVersion": "現在のバージョン",

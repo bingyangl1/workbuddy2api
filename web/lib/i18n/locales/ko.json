@@ -55,7 +55,8 @@
     "quickAdd": "빠른 추가",
     "profile": "프로필",
     "redPackets": "빨간 봉투",
-    "catalog": "모델 카탈로그"
+    "catalog": "모델 카탈로그",
+    "changelog": "변경 로그"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy 계정 풀 관리 · OpenAI 호환 리버스 프록시 게이트웨이",
@@ -1265,25 +1266,13 @@
     "ID": "인도네시아"
   },
   "changelog": {
-    "title": "변경 내역",
-    "unavailable": "변경 내역을 사용할 수 없습니다",
-    "unavailableHint": "📄 변경 내역은 릴리스 패키지에 함께 배포됩니다(`CHANGELOG.md`). 이전 버전에서 업그레이드했다면 '시스템 업데이트'를 한 번 실행하면 채워집니다. 소스에서 실행 중이라면 저장소 루트에 해당 파일이 있는지 확인하세요.",
-    "loadFailed": "변경 내역을 불러오지 못했습니다",
-    "loading": "변경 내역을 불러오는 중…",
-    "currentVersionLabel": "현재 v{v}",
-    "unreleased": "미배포",
-    "currentVersion": "현재 버전",
-    "inProgress": "개발 중",
-    "items": "{n}개 항목",
-    "thisIsCurrent": "지금 실행 중인 버전입니다",
-    "seeAll": "전체 버전 보기: 저장소 Releases 페이지를 참고하세요",
-    "truncated": "최근 {n}개 버전만 표시합니다(전체 {total}개). 이전 버전은 저장소 Releases 페이지를 확인하세요.",
-    "sectionSecurity": "보안",
-    "sectionAdded": "추가",
-    "sectionFixed": "수정",
-    "sectionImproved": "개선",
-    "sectionNotes": "설명",
-    "sectionPlanned": "예정"
+    "title": "변경 로그",
+    "description": "이 배포의 변경 기록(현재 v{version}), 오프라인 사용 가능",
+    "unreleased": "미출시",
+    "unreleasedBadge": "진행 중",
+    "current": "현재 버전",
+    "empty": "CHANGELOG.md를 찾을 수 없음",
+    "itemCount": "{n}개"
   },
   "updatePanel": {
     "currentVersion": "현재 버전",

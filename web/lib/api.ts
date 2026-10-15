@@ -48,6 +48,7 @@ import type {
   UsageOptions,
   UsageStats,
   VersionInfo,
+  ChangelogResponse,
 } from './types';
 
 // API 走同源根路径 /api（FastAPI 单端口把 /api /v1 /panel 挂在一起）。
@@ -360,6 +361,7 @@ export const syncApi = {
 /* ── 系统（server.py + routers/releases.py）────────────────────── */
 export const systemApi = {
   version: () => get<VersionInfo>('/api/app/version'),
+  changelog: () => get<ChangelogResponse>('/api/app/changelog'),
 };
 
 /* ── 成长计划（routers/growth.py）──────────────────────────────── */

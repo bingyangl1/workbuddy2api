@@ -568,6 +568,21 @@ export interface VersionInfo {
   [k: string]: unknown;
 }
 
+/* ── Changelog 查看器（routers/releases.py::changelog）───────────── */
+export interface ChangelogSection {
+  title: string;              // 新增 / 修复 / 改进 / 安全
+  items: string[];
+}
+export interface ChangelogVersion {
+  version: string;            // "0.1.0" / "Unreleased"
+  date: string;               // 日期或描述（空 = 无）
+  sections: ChangelogSection[];
+}
+export interface ChangelogResponse {
+  current_version: string;
+  versions: ChangelogVersion[];
+}
+
 /* ── 鉴权（server.py::login）───────────────────────────────────── */
 export interface LoginResponse {
   token: string;

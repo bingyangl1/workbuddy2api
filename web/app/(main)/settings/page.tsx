@@ -24,7 +24,8 @@ import {Label} from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import {Loader2, Radar, RotateCcw, Save} from 'lucide-react';
+import {Loader2, Radar, RotateCcw, Save, ScrollText} from 'lucide-react';
+import {BASE_PATH} from '@/lib/base-path';
 
 /** 标量字段（headers 单独成组）。键 = 引擎 DEFAULTS 的键。 */
 const SCALAR_FIELDS: {key: string; num?: boolean}[] = [
@@ -126,6 +127,9 @@ export default function SettingsPage() {
         description={t('settings.subtitle')}
         actions={
           <div className="flex gap-2">
+            <Button size="sm" variant="ghost" asChild>
+              <a href={`${BASE_PATH}/changelog/`}><ScrollText className="h-4 w-4" />{t('nav.changelog')}</a>
+            </Button>
             <Button size="sm" variant="outline" onClick={detect} disabled={detecting}>
               {detecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Radar className="h-4 w-4" />}
               {t('settings.detect')}

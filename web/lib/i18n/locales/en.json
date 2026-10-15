@@ -55,7 +55,8 @@
     "quickAdd": "Quick add",
     "profile": "Profile",
     "redPackets": "Red packets",
-    "catalog": "Catalog"
+    "catalog": "Catalog",
+    "changelog": "Changelog"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy account pool console · OpenAI-compatible gateway",
@@ -1290,24 +1291,12 @@
   },
   "changelog": {
     "title": "Changelog",
-    "unavailable": "Changelog unavailable",
-    "unavailableHint": "📄 The changelog ships with the release archive (`CHANGELOG.md`). If you upgraded from an older version, run an update under System update to fetch it; when running from source, make sure the file exists at the repository root.",
-    "loadFailed": "Failed to load the changelog",
-    "loading": "Loading the changelog…",
-    "currentVersionLabel": "current v{v}",
-    "unreleased": "unreleased",
-    "currentVersion": "Current version",
-    "inProgress": "In progress",
-    "items": "{n} items",
-    "thisIsCurrent": "This is the version you are running",
-    "seeAll": "All versions: see the Releases page",
-    "truncated": "Only the latest {n} of {total} versions are shown; see the repository Releases page for older ones.",
-    "sectionSecurity": "Security",
-    "sectionAdded": "Added",
-    "sectionFixed": "Fixed",
-    "sectionImproved": "Improved",
-    "sectionNotes": "Notes",
-    "sectionPlanned": "Planned"
+    "description": "Change log of this deployment (current v{version}), available offline",
+    "unreleased": "Unreleased",
+    "unreleasedBadge": "In progress",
+    "current": "Current",
+    "empty": "CHANGELOG.md not found",
+    "itemCount": "{n} items"
   },
   "updatePanel": {
     "currentVersion": "Current version",

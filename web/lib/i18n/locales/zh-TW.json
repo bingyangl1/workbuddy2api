@@ -55,7 +55,8 @@
     "quickAdd": "快速新增",
     "profile": "個人資訊",
     "redPackets": "紅包",
-    "catalog": "模型中心"
+    "catalog": "模型中心",
+    "changelog": "更新日誌"
   },
   "login": {
     "subtitle": "騰訊 CodeBuddy 帳號池管理 · OpenAI 相容反向代理閘道",
@@ -1266,24 +1267,12 @@
   },
   "changelog": {
     "title": "更新日誌",
-    "unavailable": "更新日誌無法使用",
-    "unavailableHint": "📄 更新日誌隨發佈包一起派發（`CHANGELOG.md`）。若你是從舊版本升級上來的，去「系統更新」執行一次更新即可補上；從原始碼執行時，請確認倉庫根目錄存在該檔案。",
-    "loadFailed": "讀取更新日誌失敗",
-    "loading": "正在讀取更新日誌…",
-    "currentVersionLabel": "目前 v{v}",
+    "description": "本部署的變更記錄（當前版本 v{version}），離線可用",
     "unreleased": "未發佈",
-    "currentVersion": "目前版本",
-    "inProgress": "開發中",
-    "items": "{n} 項",
-    "thisIsCurrent": "你目前執行的正是這個版本",
-    "seeAll": "查看全部版本：見倉庫 Releases 頁面",
-    "truncated": "僅顯示最近 {n} 個版本（共 {total} 個），更早的請查看倉庫 Releases 頁面。",
-    "sectionSecurity": "安全",
-    "sectionAdded": "新增",
-    "sectionFixed": "修復",
-    "sectionImproved": "改進",
-    "sectionNotes": "說明",
-    "sectionPlanned": "計劃中"
+    "unreleasedBadge": "進行中",
+    "current": "當前版本",
+    "empty": "未找到 CHANGELOG.md",
+    "itemCount": "{n} 條"
   },
   "updatePanel": {
     "currentVersion": "目前版本",

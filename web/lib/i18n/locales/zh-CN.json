@@ -55,7 +55,8 @@
     "quickAdd": "快速添加",
     "profile": "个人信息",
     "redPackets": "红包",
-    "catalog": "模型中心"
+    "catalog": "模型中心",
+    "changelog": "更新日志"
   },
   "login": {
     "subtitle": "腾讯 CodeBuddy 账号池管理 · OpenAI 兼容反代网关",
@@ -1266,24 +1267,12 @@
   },
   "changelog": {
     "title": "更新日志",
-    "unavailable": "更新日志不可用",
-    "unavailableHint": "📄 更新日志随发布包一起分发（`CHANGELOG.md`）。若你是从旧版本升级上来的，去「系统更新」执行一次更新即可补上；从源码运行时，请确认仓库根目录存在该文件。",
-    "loadFailed": "读取更新日志失败",
-    "loading": "正在读取更新日志…",
-    "currentVersionLabel": "当前 v{v}",
+    "description": "本部署的变更记录（当前版本 v{version}），离线可用",
     "unreleased": "未发布",
-    "currentVersion": "当前版本",
-    "inProgress": "开发中",
-    "items": "{n} 项",
-    "thisIsCurrent": "你当前运行的正是这个版本",
-    "seeAll": "查看全部版本：见仓库 Releases 页面",
-    "truncated": "仅显示最近 {n} 个版本（共 {total} 个），更早的请查看仓库 Releases 页面。",
-    "sectionSecurity": "安全",
-    "sectionAdded": "新增",
-    "sectionFixed": "修复",
-    "sectionImproved": "改进",
-    "sectionNotes": "说明",
-    "sectionPlanned": "计划中"
+    "unreleasedBadge": "进行中",
+    "current": "当前版本",
+    "empty": "未找到 CHANGELOG.md",
+    "itemCount": "{n} 条"
   },
   "updatePanel": {
     "currentVersion": "当前版本",
