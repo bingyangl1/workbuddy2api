@@ -69,7 +69,8 @@
     "schedules": "スケジュール",
     "growth": "成長プラン",
     "audit": "操作監査",
-    "accountGroups": "アカウントグループ"
+    "accountGroups": "アカウントグループ",
+    "layout": "レイアウト"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy アカウントプール管理 · OpenAI 互換リバースプロキシゲートウェイ",
@@ -2261,5 +2262,26 @@
     "searchPlaceholder": "キーワード（例: turing, growthEvent）",
     "searchBtn": "検索",
     "noHits": "一致なし"
+  },
+  "layout": {
+    "title": "レイアウト",
+    "description": "左メニューをカスタマイズ：項目の表示/非表示・並べ替え・グループ名変更（サーバー保存、端末を変えても保持）",
+    "save": "保存",
+    "saved": "レイアウトを保存しました",
+    "reset": "既定に戻す",
+    "resetOk": "レイアウトを既定に戻しました",
+    "export": "エクスポート",
+    "import": "インポート",
+    "imported": "レイアウトを読み込みました（保存を忘れずに）",
+    "importBad": "インポート失敗：有効なレイアウト JSON ではありません",
+    "groupNames": "グループ名",
+    "items": "メニュー項目",
+    "hiddenCount": "{n} 件を非表示",
+    "hint": "スイッチを切ると非表示、矢印で並べ替え。",
+    "moveUp": "上へ",
+    "moveDown": "下へ",
+    "toggleVisible": "{name} の表示/非表示",
+    "unsaved": "未保存の変更があります。右上の「保存」を押してください。",
+    "locked": "非表示不可"
   }
 }

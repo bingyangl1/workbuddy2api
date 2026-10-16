@@ -611,6 +611,17 @@ export interface BackupRestoreResult {
   safeguard: string;                // 恢复前自动留底的文件名
 }
 
+/* ── 界面布局（routers/layout.py，用户自定义菜单）───────────────── */
+/** 布局**差量**（只存用户改动，不存整份菜单）：新增页面自动可见。 */
+export interface LayoutPayload {
+  /** 被隐藏的 href */
+  hidden: string[];
+  /** 自定义顺序（不在其中的条目排在后面，保持默认相对顺序） */
+  order: string[];
+  /** 分组显示名覆盖（groupKey → 名字） */
+  groupLabels: Record<string, string>;
+}
+
 /* ── 鉴权（server.py::login）───────────────────────────────────── */
 export interface LoginResponse {
   token: string;

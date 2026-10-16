@@ -26,8 +26,9 @@ import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import {Menu, X} from 'lucide-react';
 
-import {NAV_GROUPS, isNavActive} from '@/lib/app-nav';
+import {isNavActive} from '@/lib/app-nav';
 import {BASE_PATH} from '@/lib/base-path';
+import {useLayout} from '@/lib/layout-context';
 import {useT} from '@/lib/i18n/provider';
 import {cn} from '@/lib/utils';
 import {navIcon} from '@/components/common/layout/nav-icons';
@@ -36,13 +37,17 @@ import {Button} from '@/components/ui/button';
 function NavList({onNavigate}: {onNavigate?: () => void}) {
   const t = useT();
   const pathname = usePathname();
+  // 菜单来自 LayoutProvider（默认菜单叠加用户的隐藏 / 排序 / 分组改名），
+  // 不是直接 import NAV_GROUPS —— 那样用户布局配置不生效。
+  const {groups} = useLayout();
 
   return (
     <nav className="flex flex-col gap-5" aria-label={t('nav.mainNav')}>
-      {NAV_GROUPS.map((group) => (
+      {groups.map((group) => (
         <div key={group.key} className="flex flex-col gap-1">
           <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-            {t(group.labelKey)}
+            {/* 用户自定义分组名优先，否则用 i18n 词条 */}
+            {group.labelOverride || t(group.labelKey)}
           </div>
           {group.items.map((item) => {
             const active = isNavActive(item, pathname, BASE_PATH);

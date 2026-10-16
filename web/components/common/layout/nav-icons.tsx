@@ -25,6 +25,7 @@ import {
   FileClock,
   Gauge,
   KeyRound,
+  LayoutPanelLeft,
   MessageSquare,
   PackageOpen,
   ScrollText,
@@ -63,6 +64,7 @@ const ICONS: Record<NavIconKey, ReactNode> = {
   appSource: <PackageOpen className="h-4 w-4" />,
   backup: <DatabaseBackup className="h-4 w-4" />,
   changelog: <Bot className="h-4 w-4" />,
+  layout: <LayoutPanelLeft className="h-4 w-4" />,
 };
 
 export function navIcon(key: NavIconKey): ReactNode {

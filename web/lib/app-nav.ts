@@ -48,7 +48,8 @@ export type NavIconKey =
   | 'password'
   | 'appSource'
   | 'backup'
-  | 'changelog';
+  | 'changelog'
+  | 'layout';
 
 /** 侧边栏分组。顺序即渲染顺序。 */
 export type NavGroupKey =
@@ -73,6 +74,15 @@ export type NavGroup = {
   key: NavGroupKey;
   labelKey: string;
   items: readonly NavItem[];
+  /**
+   * 用户自定义的分组名（覆盖 labelKey 的翻译结果）。
+   *
+   * 由 `lib/layout-context.tsx` 在叠加用户布局时注入；默认菜单里不设。
+   * 为什么是「覆盖值」而不是「直接改 labelKey」：labelKey 指向 i18n 词条
+   * （多语言），用户自定义名是**单一语言的用户输入** —— 语义不同，
+   * 分开存才不会把用户输入混进翻译表。
+   */
+  labelOverride?: string;
 };
 
 /**
@@ -139,6 +149,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       {href: '/settings/app-source', labelKey: 'appSource.title', iconKey: 'appSource'},
       {href: '/backup', labelKey: 'nav.backup', iconKey: 'backup'},
       {href: '/changelog', labelKey: 'nav.changelog', iconKey: 'changelog'},
+      {href: '/settings/layout', labelKey: 'layout.title', iconKey: 'layout'},
     ],
   },
 ];

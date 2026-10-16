@@ -69,7 +69,8 @@
     "schedules": "Schedules",
     "growth": "Growth",
     "audit": "Audit log",
-    "accountGroups": "Account groups"
+    "accountGroups": "Account groups",
+    "layout": "Layout"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy account pool console · OpenAI-compatible gateway",
@@ -2285,5 +2286,26 @@
     "searchPlaceholder": "Keyword (e.g. turing, growthEvent)",
     "searchBtn": "Search",
     "noHits": "No matches"
+  },
+  "layout": {
+    "title": "Layout",
+    "description": "Customize the sidebar: show/hide items, reorder, rename groups (stored server-side, survives device changes)",
+    "save": "Save",
+    "saved": "Layout saved",
+    "reset": "Reset to default",
+    "resetOk": "Layout reset",
+    "export": "Export",
+    "import": "Import",
+    "imported": "Layout imported (remember to save)",
+    "importBad": "Import failed: not a valid layout JSON",
+    "groupNames": "Group names",
+    "items": "Menu items",
+    "hiddenCount": "{n} hidden",
+    "hint": "Turn a switch off to hide the item; use arrows to reorder.",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "toggleVisible": "Show/hide {name}",
+    "unsaved": "You have unsaved changes — click Save at the top right.",
+    "locked": "Always visible"
   }
 }

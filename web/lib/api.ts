@@ -53,6 +53,7 @@ import type {
   BackupExportResult,
   BackupPreview,
   BackupRestoreResult,
+  LayoutPayload,
 } from './types';
 
 // API 走同源根路径 /api（FastAPI 单端口把 /api /v1 /panel 挂在一起）。
@@ -381,6 +382,13 @@ export const appSourceApi = {
   search: (q: string, limit = 20) =>
     get<{items: {file: string; line: number; text: string}[]}>(
       '/api/app-source/search', {q, limit}),
+};
+
+/* ── 界面布局（routers/layout.py，用户自定义菜单）──────────────── */
+export const layoutApi = {  get: () => get<{layout: LayoutPayload; items: string[]; groups: string[]}>('/api/layout'),
+  save: (body: LayoutPayload) =>
+    put<{ok: boolean; layout: LayoutPayload}>('/api/layout', body),
+  reset: () => post<{ok: boolean; layout: LayoutPayload}>('/api/layout/reset'),
 };
 
 /* ── 系统（server.py + routers/releases.py）────────────────────── */

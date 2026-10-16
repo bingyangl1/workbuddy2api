@@ -42,6 +42,7 @@ PAGES = [
     ("/settings/sync/", "线上同步"),
     ("/settings/password/", "修改密码"),
     ("/settings/app-source/", "逆向产物"),
+    ("/settings/layout/", "界面布局"),
     ("/backup/", "数据备份"),
     ("/changelog/", "更新日志"),
 ]
@@ -250,6 +251,9 @@ interact("/dashboard/", "模型健康表有行",
 # 测试台：模型下拉已填充
 interact("/playground/", "模型下拉已填充",
          "(document.body.innerText.includes('免费') || !!document.querySelector('button[aria-label]')) ? 'ok' : 'empty'", 2.5)
+# 界面布局页：条目开关已渲染（至少 10 个）+ 配置页自己不可关闭
+interact("/settings/layout/", "布局页开关已渲染",
+         "document.querySelectorAll('button[role=switch]').length >= 10 ? 'ok' : ('few:' + document.querySelectorAll('button[role=switch]').length)")
 
 # ── 移动端逐页溢出检查 ──
 print("\n=== 移动端 375px 逐页横向溢出 ===")

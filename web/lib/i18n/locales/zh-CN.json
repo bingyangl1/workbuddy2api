@@ -69,7 +69,8 @@
     "schedules": "定时任务",
     "growth": "成长计划",
     "audit": "操作审计",
-    "accountGroups": "账号分组"
+    "accountGroups": "账号分组",
+    "layout": "界面布局"
   },
   "login": {
     "subtitle": "腾讯 CodeBuddy 账号池管理 · OpenAI 兼容反代网关",
@@ -2052,5 +2053,26 @@
     "searchPlaceholder": "输入关键字（如 turing、growthEvent）",
     "searchBtn": "检索",
     "noHits": "无匹配结果"
+  },
+  "layout": {
+    "title": "界面布局",
+    "description": "自定义左侧菜单：显示/隐藏条目、调整顺序、重命名分组（存服务端，换设备保留）",
+    "save": "保存",
+    "saved": "布局已保存",
+    "reset": "恢复默认",
+    "resetOk": "已恢复默认布局",
+    "export": "导出",
+    "import": "导入",
+    "imported": "已导入布局（记得保存）",
+    "importBad": "导入失败：不是合法的布局 JSON",
+    "groupNames": "分组名称",
+    "items": "菜单条目",
+    "hiddenCount": "已隐藏 {n} 项",
+    "hint": "关闭开关即隐藏该项；用箭头调整顺序。",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "toggleVisible": "显示/隐藏 {name}",
+    "unsaved": "有未保存的改动，点右上角「保存」生效。",
+    "locked": "不可隐藏"
   }
 }

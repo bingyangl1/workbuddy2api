@@ -69,7 +69,8 @@
     "schedules": "스케줄",
     "growth": "성장 플랜",
     "audit": "감사 로그",
-    "accountGroups": "계정 그룹"
+    "accountGroups": "계정 그룹",
+    "layout": "레이아웃"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy 계정 풀 관리 · OpenAI 호환 리버스 프록시 게이트웨이",
@@ -2261,5 +2262,26 @@
     "searchPlaceholder": "키워드(예: turing, growthEvent)",
     "searchBtn": "검색",
     "noHits": "일치 항목 없음"
+  },
+  "layout": {
+    "title": "레이아웃",
+    "description": "왼쪽 메뉴 사용자 지정: 항목 표시/숨김, 순서 변경, 그룹 이름 변경(서버 저장, 기기 변경에도 유지)",
+    "save": "저장",
+    "saved": "레이아웃을 저장했습니다",
+    "reset": "기본값 복원",
+    "resetOk": "기본 레이아웃으로 복원됨",
+    "export": "내보내기",
+    "import": "가져오기",
+    "imported": "레이아웃을 가져왔습니다(저장 필요)",
+    "importBad": "가져오기 실패: 올바른 레이아웃 JSON이 아닙니다",
+    "groupNames": "그룹 이름",
+    "items": "메뉴 항목",
+    "hiddenCount": "{n}개 숨김",
+    "hint": "스위치를 끄면 숨겨지고, 화살표로 순서를 바꿉니다.",
+    "moveUp": "위로",
+    "moveDown": "아래로",
+    "toggleVisible": "{name} 표시/숨김",
+    "unsaved": "저장되지 않은 변경이 있습니다. 오른쪽 위 «저장»을 누르세요.",
+    "locked": "숨김 불가"
   }
 }

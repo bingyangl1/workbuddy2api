@@ -103,6 +103,7 @@ export const SECTION_NAV: Record<SectionKey, readonly SectionNavItem[]> = {
     {key: 'sync', href: '/settings/sync', labelKey: 'sync.title', iconKey: 'settings'},
     {key: 'password', href: '/settings/password', labelKey: 'password.title', iconKey: 'settings'},
     {key: 'appSource', href: '/settings/app-source', labelKey: 'appSource.title', iconKey: 'settings'},
+    {key: 'layout', href: '/settings/layout', labelKey: 'layout.title', iconKey: 'settings'},
   ],
 };
 

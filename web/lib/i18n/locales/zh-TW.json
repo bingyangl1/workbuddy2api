@@ -69,7 +69,8 @@
     "schedules": "定時任務",
     "growth": "成長計畫",
     "audit": "操作稽核",
-    "accountGroups": "帳號分組"
+    "accountGroups": "帳號分組",
+    "layout": "介面佈局"
   },
   "login": {
     "subtitle": "騰訊 CodeBuddy 帳號池管理 · OpenAI 相容反向代理閘道",
@@ -2261,5 +2262,26 @@
     "searchPlaceholder": "輸入關鍵字（如 turing、growthEvent）",
     "searchBtn": "檢索",
     "noHits": "無符合結果"
+  },
+  "layout": {
+    "title": "介面佈局",
+    "description": "自訂左側選單：顯示/隱藏項目、調整順序、重新命名分組（存伺服端，換裝置保留）",
+    "save": "儲存",
+    "saved": "佈局已儲存",
+    "reset": "恢復預設",
+    "resetOk": "已恢復預設佈局",
+    "export": "匯出",
+    "import": "匯入",
+    "imported": "已匯入佈局（記得儲存）",
+    "importBad": "匯入失敗：不是合法的佈局 JSON",
+    "groupNames": "分組名稱",
+    "items": "選單項目",
+    "hiddenCount": "已隱藏 {n} 項",
+    "hint": "關閉開關即隱藏該項；用箭頭調整順序。",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "toggleVisible": "顯示/隱藏 {name}",
+    "unsaved": "有未儲存的變更，點右上角「儲存」生效。",
+    "locked": "不可隱藏"
   }
 }
