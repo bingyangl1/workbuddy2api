@@ -289,19 +289,69 @@ def cli_version() -> str:
 
 
 def ua_brand(realm: Realm) -> str:
-    """UA 平台品牌段：CN 'WorkBuddy' / Global 'WorkBuddy AI'（Go defaultWorkBuddyUAFor）。"""
-    return "WorkBuddy AI" if realm == GLOBAL else "WorkBuddy"
+    """UA 品牌段 —— 即客户端 `cli/product.json` 的 `applicationName`。
+
+    **实测修正（原实现是错的）**：这里原来返回 `"WorkBuddy AI"`（从 Go 上游
+    `defaultWorkBuddyUAFor` 抄来的），但官方客户端的 UA 是用 **applicationName**
+    拼的（见 asar 内 `app-instance.js`）：
+
+        if (r?.applicationName) {
+          let e = [`${r.applicationName}/${r.productVersion || 'unknown'}`, ...]
+        }
+
+    两版的 `applicationName` 实测为：
+        cn     : `WorkBuddy`      → `WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0`
+        global : `workbuddy-ai`   → `workbuddy-ai/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0`
+
+    所以国际版是**小写连字符的 `workbuddy-ai`**，不是 `WorkBuddy AI`
+    （后者是 `productName`，官方**不**用它拼 UA）。
+    """
+    try:
+        from admin import client_profile as cprofile
+        name = cprofile.effective(realm=realm).get("application_name")
+        if name:
+            return str(name)
+    except Exception:  # noqa: BLE001 探测不可用时回落到静态映射
+        pass
+    return "workbuddy-ai" if realm == GLOBAL else "WorkBuddy"
 
 
 def chat_ua(realm: Realm) -> str:
-    """chat 域出站 UA：`WorkBuddy/<ver> <brand>/<ver> CLI/<cli>`（镜像 Go 形状）。"""
+    """chat 域出站 UA：三段同源 —— `<applicationName>/<v>` 重复两段 + `CLI/<cli>`。
+
+    与官方客户端 `app-instance.js` 的构造一致（三段都取同一个
+    `applicationName` 与 `productVersion`），并按 realm 取对应客户端的参数。
+
+    原实现的形状是 `WorkBuddy/<v> <brand>/<v> CLI/<cli>` —— 第一段恒为
+    `WorkBuddy`，国际版就成了 `WorkBuddy/5.8.4 workbuddy-ai/5.8.4 …`：
+    **同一串 UA 里混了两个产品名**，官方从不这样发。
+    """
+    try:
+        from admin import client_profile as cprofile
+        ua = cprofile.ua(realm=realm)
+        if ua:
+            return ua
+    except Exception:  # noqa: BLE001 探测不可用时回落到静态形状
+        pass
     ver = client_version()
-    return f"WorkBuddy/{ver} {ua_brand(realm)}/{ver} CLI/{cli_version()}"
+    brand = ua_brand(realm)
+    return f"{brand}/{ver} {brand}/{ver} CLI/{cli_version()}"
 
 
-def billing_ua() -> str:
-    """billing 域出站 UA：单段 `WorkBuddy/<ver>`（官方白名单接口显式覆写形态）。"""
-    return f"WorkBuddy/{client_version()}"
+def billing_ua(realm: Realm = "cn") -> str:
+    """billing 域出站 UA：单段 `<applicationName>/<ver>`。
+
+    官方白名单接口的显式覆写形态（单段，不带 CLI 那段）。
+    品牌段同样取对应版本的 `applicationName`（cn=`WorkBuddy` /
+    global=`workbuddy-ai`），版本号取该版本的桌面端版本。
+    """
+    brand = ua_brand(realm)
+    try:
+        from admin import client_profile as cprofile
+        v = cprofile.desktop_version(realm=realm)
+    except Exception:  # noqa: BLE001
+        v = client_version()
+    return f"{brand}/{v}"
 
 
 def device_fingerprint_headers(uid: str | None) -> dict:
@@ -361,7 +411,8 @@ def billing_headers(realm: Realm, auth: dict | None = None) -> dict:
     auth = auth if isinstance(auth, dict) else {}
     token = str(auth.get("access_token") or "")
     h = headers(realm, token or None)
-    h["User-Agent"] = billing_ua()
+    # billing 的 UA 覆写也按 realm 取品牌段与版本（两版不同）
+    h["User-Agent"] = billing_ua(realm)
     uid = str(auth.get("uid") or "")
     if uid:
         h["X-User-Id"] = uid

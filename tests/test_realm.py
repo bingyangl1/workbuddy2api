@@ -421,9 +421,14 @@ class UserAgentTests(unittest.TestCase):
         realm.invalidate()
 
     def test_ua_brand_by_realm(self):
-        """品牌段：CN 'WorkBuddy' / Global 'WorkBuddy AI'。"""
+        """品牌段 = 客户端 `applicationName`：CN 'WorkBuddy' / Global 'workbuddy-ai'。
+
+        依据：用 node 实跑客户端官方构造逻辑（见 realm.ua_brand 的说明）——
+        国际版 applicationName 实测为 `workbuddy-ai`（`WorkBuddy AI` 是 productName，
+        官方不用于 UA）。原断言 `WorkBuddy AI` 抄自 Go 上游旧规格。
+        """
         self.assertEqual(realm.ua_brand("cn"), "WorkBuddy")
-        self.assertEqual(realm.ua_brand("global"), "WorkBuddy AI")
+        self.assertEqual(realm.ua_brand("global"), "workbuddy-ai")
 
     def test_chat_ua_three_segment_shape(self):
         """chat UA 三段式：WorkBuddy/<v> <brand>/<v> CLI/<cli>。
@@ -431,13 +436,13 @@ class UserAgentTests(unittest.TestCase):
         brand 含空格（'WorkBuddy AI'），故用正则断言结构而非空格切分。
         """
         pat = re.compile(
-            r"^WorkBuddy/[\w.]+ (WorkBuddy AI|WorkBuddy)/[\w.]+ CLI/[\w.]+$")
+            r"^(WorkBuddy|workbuddy-ai)/[\w.]+ (WorkBuddy|workbuddy-ai)/[\w.]+ CLI/[\w.]+$")
         for r in ("cn", "global"):
             self.assertRegex(realm.chat_ua(r), pat, r)
 
     def test_chat_ua_global_carries_ai_brand(self):
-        """global UA 含 ' WorkBuddy AI/' 平台段（Go TestChatHeadersGlobalRealm）。"""
-        self.assertIn(" WorkBuddy AI/", realm.chat_ua("global"))
+        """global UA 的品牌段是 `workbuddy-ai`（客户端 applicationName）。"""
+        self.assertIn("workbuddy-ai/", realm.chat_ua("global"))
 
     def test_chat_ua_cn_never_carries_ai_brand(self):
         """CN UA 不得含 'WorkBuddy AI'（Go TestChatHeadersCNRealm 零回归）。"""
@@ -475,7 +480,7 @@ class HeadersTests(unittest.TestCase):
         h = realm.headers("global")
         self.assertEqual(h["Origin"], "https://www.workbuddy.ai")
         self.assertEqual(h["Referer"], "https://www.workbuddy.ai/")
-        self.assertIn(" WorkBuddy AI/", h["User-Agent"])
+        self.assertIn("workbuddy-ai/", h["User-Agent"])
         self.assertEqual(h["Accept-Language"], "en-US")
         self.assertEqual(h["X-CodeBuddy-Request"], "1")
 
@@ -507,8 +512,9 @@ class HeadersTests(unittest.TestCase):
         self.assertEqual(h["X-Tenant-Id"], "e1")
         self.assertEqual(h["X-Domain"], "www.workbuddy.ai")
         self.assertEqual(h["X-Device-Token"], "dev-tok")
-        # UA 覆写为单段（无 CLI 段）
-        self.assertTrue(h["User-Agent"].startswith("WorkBuddy/"))
+        # UA 覆写为单段（无 CLI 段）；品牌段按 realm 取客户端 applicationName
+        self.assertTrue(h["User-Agent"].startswith("workbuddy-ai/"),
+                        f"global 的 billing UA 应以 workbuddy-ai/ 开头，实际 {h['User-Agent']!r}")
         self.assertNotIn(" CLI/", h["User-Agent"])
 
     def test_billing_headers_tolerates_none(self):

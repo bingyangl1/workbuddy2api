@@ -115,7 +115,7 @@ class CredentialManagerRealmTests(unittest.TestCase):
         self.assertNotIn("WorkBuddy AI", cn["User-Agent"])
         g = self._cm(domain="www.workbuddy.ai")._build_headers_from(
             {"accessToken": "t", "domain": "www.workbuddy.ai"}, {"uid": "u"})
-        self.assertIn("WorkBuddy AI", g["User-Agent"])
+        self.assertIn("workbuddy-ai", g["User-Agent"])
 
     def test_realm_chat_urls(self):
         cm = self._cm()

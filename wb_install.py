@@ -104,16 +104,59 @@ DEFAULT_DESKTOP_VERSION = "5.5.6"
 DEFAULT_CLI_VERSION = "2.137.1"
 DEFAULT_TURING_CHANNEL_ID = 109144
 DEFAULT_TURING_PRODUCT_NAME = "WorkBuddy"
+#: UA 品牌段的兜底（客户端源码里用的是 cli/product.json 的 applicationName）。
+#: 兜底取国内版值 —— 探测不到任何客户端时，报国内版身份比报一个乱七八糟的
+#: 字符串更像「官方客户端」，但**realm=global 时不要用这个**（用 REALM_FALLBACKS）。
+DEFAULT_APPLICATION_NAME = "WorkBuddy"
 #: 客户端构建 commit 与发布日期（桌面事件指纹用）。同样只是兜底：
 #: 真实值从 cli/product.json 的 commit / date 读。
 DEFAULT_COMMIT = "5f9692923c93033111c51ad7b003eb80204a9b75"
 DEFAULT_RELEASE_DATE_MS = 1789036585355
 
 #: 安装基目录名候选（大小写变体都要试：Windows 上不区分，Linux 上区分）
-_BASE_NAMES = ("WorkBuddy", "workbuddy")
+#:
+#: **必须两版都列**：国际版装在 `WorkBuddyAI`（`win32ExecutableName=WorkBuddyAI`、
+#: `applicationName=workbuddy-ai`），国内版装在 `WorkBuddy`。
+#: 只列国内版名字的话，国际版客户端永远探测不到 —— 后果是国际版账号带着
+#: 国内版的版本号/渠道号去请求国际版上游，风控直接识别为「非官方客户端」。
+_BASE_NAMES = ("WorkBuddy", "workbuddy", "WorkBuddyAI", "workbuddyai",
+               "WorkBuddy AI", "workbuddy-ai")
+
+#: realm → 安装基目录名（按优先级）。用于 `install_dir(realm=...)` 精确挑选。
+_REALM_BASE_NAMES = {
+    "cn": ("WorkBuddy", "workbuddy"),
+    "global": ("WorkBuddyAI", "workbuddyai", "WorkBuddy AI", "workbuddy-ai"),
+}
+
+#: realm → 客户端产品身份兜底（当对应目录**探测不到**时使用）。
+#:
+#: 这些值取自两版客户端实测（cli/product.json + install-manifest.json）：
+#:   cn     : applicationName=WorkBuddy      channel=109144 product=WorkBuddy
+#:   global : applicationName=workbuddy-ai   channel=400111 product=WorkBuddy AI
+#:
+#: 为什么要兜底而不是「探测不到就留空」：留空会让 UA 退化成国内版形态，
+#: 那正是要避免的风控特征。宁可报一个已知的官方值。
+REALM_FALLBACKS: dict[str, dict] = {
+    "cn": {
+        "application_name": "WorkBuddy",
+        "turing_product_name": "WorkBuddy",
+        "turing_channel_id": 109144,
+    },
+    "global": {
+        "application_name": "workbuddy-ai",
+        "turing_product_name": "WorkBuddy AI",
+        "turing_channel_id": 400111,
+    },
+}
 
 #: 参与扫描的默认盘符（Windows）。用 WORKBUDDY_DRIVES 覆盖。
 _DEFAULT_DRIVES = "C,D,E,F,G"
+
+#: 用户自建安装目录的常见中间层（`<盘>:\<这些>\<客户端名>`）。
+#:
+#: 实测踩过：客户端在 `D:\Software\WorkBuddy`，而盘根扫描找不到它 →
+#: `install_dir=None` → 所有风控参数退化成兜底值（版本号/渠道号全错）。
+_COMMON_SUBDIRS = ("Software", "Programs", "Apps", "Tools", "Dev")
 
 #: asar 相对于安装基目录的路径
 _ASAR_REL = ("resources", "app.asar")
@@ -269,6 +312,11 @@ class _WorkBuddyInstall:
         self._lock = threading.RLock()
         self._cache: dict = {}
         self._cache_at: float = 0.0
+        #: 按 realm 分开的探测缓存（`{"cn": (ts, data), "global": (...)}`）。
+        #: 与主缓存分开，避免「按 realm 探测」把「不带 realm 的结果」污染掉。
+        self._realm_cache: dict = {}
+        #: 临时目录名过滤器：非空时 `_candidate_dirs` 只产出该 realm 的目录名。
+        self._realm_filter: str = ""
         #: 运行期覆盖（来自后台设置，优先级仅次于环境变量）。
         #: 用户不想改 `.env`（也不想重启进程）时，可在后台直接指定安装目录，
         #: 由 admin/wb_paths.py 在启动时注入这里。
@@ -293,6 +341,8 @@ class _WorkBuddyInstall:
             self._override_at = time.time()
             self._cache = {}
             self._cache_at = 0.0
+            # realm 缓存也要清：覆盖变了之后旧的两份探测结果都失效了
+            self._realm_cache = {}
 
     def get_overrides(self) -> dict:
         with self._lock:
@@ -513,21 +563,46 @@ class _WorkBuddyInstall:
             out.append(a)                        # 也把文件本身当候选
 
         # 2) 常见安装基目录
+        #    `self._realm_filter` 非空时只产出该 realm 的目录名 —— 这是
+        #    「同一台机器同时装了国内版与国际版」时按版本精确探测的关键。
+        names = self._base_names()
+        drives = (os.getenv("WORKBUDDY_DRIVES") or "").strip() or _DEFAULT_DRIVES
         for ev in ("LOCALAPPDATA", "APPDATA", "ProgramFiles",
                    "ProgramFiles(x86)", "ProgramW6432", "USERPROFILE", "HOME"):
             base = os.getenv(ev)
             if not base:
                 continue
-            for name in _BASE_NAMES:
+            for name in names:
                 out.append(Path(base) / name)
 
-        # 3) 各盘根目录
-        drives = (os.getenv("WORKBUDDY_DRIVES") or "").strip() or _DEFAULT_DRIVES
+        # 2b) **常见的「用户自选目录」**。
+        #
+        # 实测踩过：客户端装在 `D:\Software\WorkBuddy`，而上面的扫描只覆盖
+        # 「盘根 / 系统标准目录」→ 探测不到 → `install_dir=None` → 所有参数
+        # 退化成兜底默认值（版本号、渠道号全错，正是风控特征）。
+        #
+        # 这里补上典型的用户自建目录：`<盘>:\Software\`、`<盘>:\Programs\`、
+        # `<盘>:\Apps\`、`<盘>:\Tools\`。多扫 4 个目录名 × 盘符的成本极低
+        # （一次 `is_dir` + `resources/app.asar` 检查），换来的
+        # 「不用手工配置就能自动发现」收益很高。
         for root in _iter_drive_roots(drives):
-            for name in _BASE_NAMES:
+            for mid in _COMMON_SUBDIRS:
+                for name in names:
+                    out.append(root / mid / name)
+
+        # 3) 各盘根目录
+        for root in _iter_drive_roots(drives):
+            for name in names:
                 out.append(root / name)
 
         return _dedup(out)
+
+    def _base_names(self) -> tuple[str, ...]:
+        """当前该扫哪些安装目录名（受 realm 过滤影响）。"""
+        rf = (getattr(self, "_realm_filter", "") or "").strip().lower()
+        if rf in _REALM_BASE_NAMES:
+            return _REALM_BASE_NAMES[rf]
+        return _BASE_NAMES
 
     # -- 内部：读 json / exe 版本 / CLI 版本 ------------------------------
     @staticmethod
@@ -667,11 +742,62 @@ class _WorkBuddyInstall:
         return self._data()
 
     # -- 对外：各项取值 ---------------------------------------------------
-    def install_dir(self) -> Path | None:
+    def install_dir(self, realm: str = "") -> Path | None:
+        """安装基目录。`realm` 非空时**只返回该版本**的目录（没有则 None）。
+
+        为什么要 realm：本机可能同时装了国内版（`WorkBuddy`）与国际版
+        （`WorkBuddyAI`）。不带 realm 时返回「按候选顺序第一个命中的」，
+        对国际版账号来说很可能是错的目录 → 参数全错 → 风控识别。
+        """
+        if realm:
+            return self._realm_data(realm).get("install_dir")
         return self._data()["install_dir"]
 
-    def asar_path(self) -> Path | None:
+    def _realm_data(self, realm: str) -> dict:
+        """按 realm 探测一次并缓存（与主探测分开缓存，互不污染）。"""
+        r = (realm or "").strip().lower()
+        if r not in _REALM_BASE_NAMES:
+            return self._data()
+        key = f"__realm_{r}"
+        with self._lock:
+            now = time.time()
+            cache = getattr(self, "_realm_cache", None)
+            if cache is None:
+                cache = {}
+                self._realm_cache = cache
+            hit = cache.get(r)
+            if hit and (now - hit[0]) < _CACHE_TTL:
+                return hit[1]
+            try:
+                data = self._resolve_for_realm(r)
+            except Exception as e:
+                _logger.warning("WorkBuddy[%s] 安装目录发现失败：%s", r, e)
+                data = {"install_dir": None, "asar": None, "unpacked": None,
+                        "desktop_version": "", "cli_version": "",
+                        "turing_channel_id": 0, "turing_product_name": "",
+                        "commit": "", "release_date_ms": 0, "deployment_type": "",
+                        "application_name": "", "plugin_name": "", "sources": {}}
+            cache[r] = (now, data)
+            return data
+
+    def _resolve_for_realm(self, realm: str) -> dict:
+        """把「只含该 realm 目录名」的候选列表喂给 `_find_install_dir`。
+
+        实现方式：临时装一个目录名过滤器，让 `_candidate_dirs` 只产出该 realm
+        的候选；`_resolve()` 的其余逻辑（读 manifest / product.json / 兜底）
+        完全复用，不重复实现，避免两版行为漂移。
+        """
+        prev = getattr(self, "_realm_filter", "")
+        self._realm_filter = realm
+        try:
+            return self._resolve()
+        finally:
+            self._realm_filter = prev
+
+    def asar_path(self, realm: str = "") -> Path | None:
         """app.asar 的完整路径（找不到返回 None）。"""
+        if realm:
+            return self._realm_data(realm).get("asar")
         return self._data()["asar"]
 
     def unpacked_dir(self) -> Path | None:
@@ -882,50 +1008,111 @@ class _WorkBuddyInstall:
                            if ok else "asar 内没有匹配的源码文件"),
                 "stat": stat}
 
-    def desktop_version(self) -> str:
-        """桌面端版本：env 覆盖 > 安装包元数据 > exe 资源 > 兜底默认。"""
+    def desktop_version(self, realm: str = "") -> str:
+        """桌面端版本：env 覆盖 > 安装包元数据 > exe 资源 > 兜底默认。
+
+        `realm` 非空时取**该版本客户端**的版本号（本机两版都装时必需：
+        国内版 5.8.3 / 国际版 5.8.4，报错版本号是明显风控特征）。
+        """
         env = (os.getenv("WORKBUDDY_DESKTOP_VERSION") or "").strip()
         if env:
             return env
-        return self._data()["desktop_version"] or DEFAULT_DESKTOP_VERSION
+        d = self._realm_data(realm) if realm else self._data()
+        return d["desktop_version"] or DEFAULT_DESKTOP_VERSION
 
-    def cli_version(self) -> str:
+    def cli_version(self, realm: str = "") -> str:
         """内嵌 CLI 版本：env 覆盖 > dist 内嵌元数据 > 兜底默认。"""
         env = (os.getenv("WORKBUDDY_CLI_VERSION") or "").strip()
         if env:
             return env
-        return self._data()["cli_version"] or DEFAULT_CLI_VERSION
+        d = self._realm_data(realm) if realm else self._data()
+        return d["cli_version"] or DEFAULT_CLI_VERSION
 
-    def desktop_ua(self) -> str:
-        """官方桌面端三段式 UA：`WorkBuddy/<v> WorkBuddy/<v> CLI/<cli>`。"""
-        v = self.desktop_version()
-        return f"WorkBuddy/{v} WorkBuddy/{v} CLI/{self.cli_version()}"
+    def desktop_ua(self, realm: str = "") -> str:
+        """官方桌面端三段式 UA：`<applicationName>/<v> <applicationName>/<v> CLI/<cli>`。
 
-    def turing_channel_id(self) -> int:
+        ## 品牌段用 `applicationName` 而不是硬编码 `WorkBuddy`（实测修正）
+
+        客户端源码里的构造是：
+
+            if (r?.applicationName) {
+              let e = [`${r.applicationName}/${r.productVersion || 'unknown'}`, ...]
+            }
+
+        所以品牌段来自 `cli/product.json` 的 `applicationName`：
+
+            cn      → `WorkBuddy`      → `WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0`
+            global  → `workbuddy-ai`   → `workbuddy-ai/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0`
+
+        原实现硬编码 `WorkBuddy/`，于是**国际版账号带着国内版品牌段的 UA** 出站 ——
+        这是很明显的风控特征（realm.py 里那句「Global = WorkBuddy AI」是从 Go 上游
+        抄来的旧规格，实际客户端用的是小写连字符的 `workbuddy-ai`）。
+
+        `realm` 为空时按「本机探测到的那一份」走（保持旧调用零改动）。
+        """
+        v = self.desktop_version(realm=realm)
+        name = self.application_name(realm=realm) or DEFAULT_APPLICATION_NAME
+        cli = self.cli_version(realm=realm)
+        return f"{name}/{v} {name}/{v} CLI/{cli}"
+
+    def turing_channel_id(self, realm: str = "") -> int:
+        """风控渠道号（Turing channelId）。按 realm 取对应值。
+
+        实测两版不同（来自各自 cli/product.json 的 channelId）：
+            cn     = 109144
+            global = 400111
+
+        原实现硬编码 `109144` 作兜底，于是**国际版账号也会报国内版渠道号** ——
+        上游一比对就知道不是官方国际版客户端。这是最硬的风控特征之一。
+        """
         env = (os.getenv("WORKBUDDY_TURING_CHANNEL_ID") or "").strip()
         if env:
             try:
                 return int(env)
             except ValueError:
                 pass
-        return self._data()["turing_channel_id"] or DEFAULT_TURING_CHANNEL_ID
+        v = self._data().get("turing_channel_id") or 0
+        if v:
+            # 探测到的是国内版、但调用方要 global → 用 global 的已知值
+            if realm and not self._realm_matches(realm):
+                return int(REALM_FALLBACKS.get(realm, {}).get(
+                    "turing_channel_id", DEFAULT_TURING_CHANNEL_ID))
+            return int(v)
+        if realm:
+            return int(REALM_FALLBACKS.get(realm, {}).get(
+                "turing_channel_id", DEFAULT_TURING_CHANNEL_ID))
+        return DEFAULT_TURING_CHANNEL_ID
 
-    def turing_product_name(self) -> str:
-        return ((os.getenv("WORKBUDDY_TURING_PRODUCT_NAME") or "").strip()
-                or self._data()["turing_product_name"]
-                or DEFAULT_TURING_PRODUCT_NAME)
+    def turing_product_name(self, realm: str = "") -> str:
+        """风控产品名（Turing）。按 realm 兜底：cn=`WorkBuddy` / global=`WorkBuddy AI`。"""
+        v = ((os.getenv("WORKBUDDY_TURING_PRODUCT_NAME") or "").strip()
+             or self._data().get("turing_product_name"))
+        if v:
+            if realm and not self._realm_matches(realm):
+                return REALM_FALLBACKS.get(realm, {}).get("turing_product_name") \
+                       or DEFAULT_TURING_PRODUCT_NAME
+            return v
+        if realm:
+            return REALM_FALLBACKS.get(realm, {}).get("turing_product_name") \
+                   or DEFAULT_TURING_PRODUCT_NAME
+        return DEFAULT_TURING_PRODUCT_NAME
 
-    def commit(self) -> str:
+    def commit(self, realm: str = "") -> str:
         """客户端构建 commit：env 覆盖 > cli/product.json > 兜底默认。
 
         桌面事件指纹里要报这个值（官方客户端会报真实 commit）。
+        **两版不同**（实测 cn=db0e9b51… / global=73952edb…），所以支持 realm。
         """
         env = (os.getenv("WORKBUDDY_COMMIT") or "").strip()
         if env:
             return env
-        return self._data().get("commit") or DEFAULT_COMMIT
+        d = self._realm_data(realm) if realm else self._data()
+        # 探测到的是国内版值、但调用方要 global → 不要硬用（宁可报兜底）
+        if realm and not self._realm_matches(realm):
+            return DEFAULT_COMMIT
+        return d.get("commit") or DEFAULT_COMMIT
 
-    def release_date_ms(self) -> int:
+    def release_date_ms(self, realm: str = "") -> int:
         """客户端发布日期（毫秒时间戳）：env 覆盖 > product.json > 兜底默认。"""
         env = (os.getenv("WORKBUDDY_RELEASE_DATE_MS") or "").strip()
         if env:
@@ -946,15 +1133,46 @@ class _WorkBuddyInstall:
             return env
         return self._data().get("deployment_type") or "SaaS"
 
-    def application_name(self) -> str:
+    def application_name(self, realm: str = "") -> str:
         """产品名（`applicationName`），UA 第一段用它。
 
-        读不到时回落到 "WorkBuddy"。
+        读不到时按 realm 回落到已知的官方值（cn=`WorkBuddy` /
+        global=`workbuddy-ai`），而不是一律 `WorkBuddy` —— 后者会让国际版
+        带着国内版品牌段出站（风控特征）。
+
+        `realm` 为空时用「本机探测到的那份」（旧调用零改动）。
         """
         env = (os.getenv("WORKBUDDY_APPLICATION_NAME") or "").strip()
         if env:
             return env
-        return self._data().get("application_name") or "WorkBuddy"
+        v = self._data().get("application_name")
+        if v:
+            # 探测到的是国内版值、但调用方要 global → 用 global 的兜底
+            if realm and not self._realm_matches(realm):
+                return REALM_FALLBACKS.get(realm, {}).get("application_name") \
+                       or DEFAULT_APPLICATION_NAME
+            return v
+        if realm:
+            return REALM_FALLBACKS.get(realm, {}).get("application_name") \
+                   or DEFAULT_APPLICATION_NAME
+        return DEFAULT_APPLICATION_NAME
+
+    def _realm_matches(self, realm: str) -> bool:
+        """本机探测到的客户端是否属于该 realm。
+
+        判据用 `install_dir` 名（最可靠、不依赖 product.json 是否可读）：
+        路径里出现 `WorkBuddyAI` / `workbuddy-ai` → global；否则 → cn。
+        """
+        try:
+            d = self._data().get("install_dir")
+            if not d:
+                return False
+            s = str(d).lower().replace("-", "").replace(" ", "")
+            if "workbuddyai" in s:
+                return realm == "global"
+            return realm == "cn"
+        except Exception:
+            return False
 
     def plugin_name(self) -> str:
         """扩展名（`authentication.id`），桌面事件指纹的 extName 用它。"""

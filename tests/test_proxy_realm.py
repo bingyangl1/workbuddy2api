@@ -98,14 +98,14 @@ class SelectAccountRealmTests(unittest.TestCase):
 
 
 class GlobalUAOverrideTests(unittest.TestCase):
-    """Global 账号出站 UA 必须带 WorkBuddy AI 品牌段（Go defaultWorkBuddyUAFor）。"""
+    """Global 账号出站 UA 必须带 `workbuddy-ai` 品牌段（= 客户端 applicationName）。"""
 
     def test_global_ua_overridden(self):
         sess = mock.MagicMock()
         sess.realm = "global"
         headers = {"User-Agent": "WorkBuddy/5.5.6 WorkBuddy/5.5.6 CLI/2.137.1"}
         out = proxy._global_ua_override(sess, headers)
-        self.assertIn("WorkBuddy AI/", out["User-Agent"])
+        self.assertIn("workbuddy-ai/", out["User-Agent"])
 
     def test_cn_ua_untouched(self):
         sess = mock.MagicMock()

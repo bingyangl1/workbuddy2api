@@ -59,12 +59,24 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 #: SystemSetting 里的键名
+#
+# 按 realm 分档存两份：`client_profile:cn` / `client_profile:global`。
+# 旧的无后缀键（`client_profile`）仍被读取，视为 **cn 的那份**（向后兼容）。
 PROFILE_KEY = "client_profile"          # 档案本体（JSON 字符串）
 SOURCE_KEY = "client_profile_source"    # auto | saved
+
+#: 支持的两个版本域。顺序即「同时展示 / 一起探测」的顺序。
+_REALMS = ("cn", "global")
 
 SOURCE_AUTO = "auto"
 SOURCE_SAVED = "saved"
 _VALID_SOURCES = (SOURCE_AUTO, SOURCE_SAVED)
+
+#: 桌面端 UA / 风控头支持的 realm 取值（含空 = 本机自动判定）。
+def _norm_realm(realm: str | None) -> str:
+    """归一化 realm：只接受 cn/global，其余按 cn（fail-closed，与引擎其它处一致）。"""
+    r = (realm or "").strip().lower()
+    return r if r in _REALMS else "cn"
 
 #: DB 缓存时长（秒）。保存时会立即失效，所以这只是多进程下的收敛延迟。
 _CACHE_TTL = 30.0
@@ -127,6 +139,40 @@ DEFAULTS: dict[str, Any] = {
     "report_delay": 2000,
 }
 
+#: 按 realm 覆盖 `DEFAULTS` 的那几项（**两版的产品身份不同**）。
+#:
+#: 取值来自两版客户端的实测解包（`cli/product.json` + `install-manifest.json`）：
+#:
+#:     | 字段                | cn          | global                      |
+#:     |---------------------|-------------|-----------------------------|
+#:     | applicationName     | WorkBuddy   | workbuddy-ai                |
+#:     | productName         | WorkBuddy   | WorkBuddy AI                |
+#:     | turingChannelId     | 109144      | 400111                      |
+#:     | authentication.id   | workbuddy-desktop | workbuddy-desktop-ai   |
+#:     | desktopVersion      | 5.8.3       | 5.8.4                       |
+#:
+#: 为什么要兜底而不是「探测不到就算了」：线上服务器不装客户端，
+#: 全靠同步过来的档案 —— 如果同步的只有一份（或没同步），兜底值就是
+#: 实际发出去的身份。混用是**最明显的风控特征**（国际版请求带国内版渠道号）。
+_REALM_DEFAULTS: dict[str, dict[str, Any]] = {
+    "cn": {
+        "ide_name": "WorkBuddy",
+        "ide_type": "WorkBuddy",
+        "turing_product_name": "WorkBuddy",
+        "turing_channel_id": 109144,
+        "application_name": "WorkBuddy",
+        "ext_name": "workbuddy-desktop",
+    },
+    "global": {
+        "ide_name": "workbuddy-ai",
+        "ide_type": "workbuddy-ai",
+        "turing_product_name": "WorkBuddy AI",
+        "turing_channel_id": 400111,
+        "application_name": "workbuddy-ai",
+        "ext_name": "workbuddy-desktop-ai",
+    },
+}
+
 #: 值为非负整数的键（保存时按此校验/转换）
 _INT_KEYS = ("cpu_cores", "memory_size", "report_delay", "turing_channel_id",
              "release_date_ms")
@@ -152,8 +198,11 @@ def _int_or_none(v) -> int | None:
 # ---------------------------------------------------------------------------
 # 现场探测
 # ---------------------------------------------------------------------------
-def snapshot() -> dict:
+def snapshot(realm: str = "") -> dict:
     """探测本机客户端，返回**只包含真实探测到的键**的档案。
+
+    `realm` 指定探测哪一版（cn=国内版目录 / global=国际版目录）；
+    为空时探测「候选顺序里第一个命中的」那版（旧行为，保持兼容）。
 
     探测不到任何东西时返回空 dict —— 调用方据此判断「这台机器上没有客户端」。
     线上服务器就是这种情况，它靠同步过来的 saved 档案工作。
@@ -172,9 +221,10 @@ def snapshot() -> dict:
         _logger.debug("wb_install 不可用，跳过客户端探测：%s", e)
         return out
 
+    r = _norm_realm(realm)
     try:
         # sources 记录每个值的真实来源；带「兜底」字样的一律不算探测到
-        data = WB._data()
+        data = WB._realm_data(r) if realm else WB._data()
         srcs = data.get("sources") or {}
 
         def real(key: str) -> bool:
@@ -182,27 +232,30 @@ def snapshot() -> dict:
             s = srcs.get(key) or ""
             return bool(s)
 
-        if WB.is_version_dynamic():
-            out["desktop_version"] = WB.desktop_version()
-            out["cli_version"] = WB.cli_version()
+        if data.get("desktop_version") and data.get("cli_version"):
+            out["desktop_version"] = WB.desktop_version(realm=r) if realm \
+                else WB.desktop_version()
+            out["cli_version"] = WB.cli_version(realm=r) if realm else WB.cli_version()
         # 下面这几项来自 product.json / 安装目录，与「版本是否动态」无关，
         # 所以单独按各自来源判断；读不到就不放进探测结果。
         if real("turing_channel_id"):
-            out["turing_channel_id"] = WB.turing_channel_id()
+            out["turing_channel_id"] = WB.turing_channel_id(realm=r) if realm \
+                else WB.turing_channel_id()
         if real("commit"):
-            out["commit"] = WB.commit()
+            out["commit"] = WB.commit(realm=r) if realm else WB.commit()
         if real("release_date_ms"):
             out["release_date_ms"] = WB.release_date_ms()
         # 产品身份三件套：同样只在安装包里真读到才采纳。
         #  * deploymentType -> 请求头 X-Product（部署形态，官方 WorkBuddy 为 "SaaS"）
-        #  * applicationName -> UA 第一段的产品名
+        #  * applicationName -> UA 第一段的产品名（**两版不同**：WorkBuddy / workbuddy-ai）
         #  * authentication.id -> 桌面事件指纹的 extName
         if real("deployment_type"):
             out["product"] = WB.deployment_type()
             # 遥测事件里的 product 字段与请求头同源（都取 deploymentType）
             out["fp_product"] = WB.deployment_type()
         if real("application_name"):
-            out["application_name"] = WB.application_name()
+            out["application_name"] = WB.application_name(realm=r) if realm \
+                else WB.application_name()
         if real("plugin_name"):
             out["ext_name"] = WB.plugin_name()
         # 产品名只有产品包里写死了才可信；当前安装包里没有这个字段，
@@ -295,32 +348,86 @@ class ClientProfileStore:
     `effective()` 由这三层算出，**结果也缓存**：它在每个请求上被调用
     （拼上游头、拼桌面指纹），现场探测 + 环境变量扫描合计约 40µs，
     对高并发网关来说不该每个请求都付。
+
+    ## 按 realm 分档（**必须**）
+
+    国内版与国际版的客户端参数**本质不同**，实测（解包两个客户端）：
+
+        | 字段              | cn               | global          |
+        |-------------------|------------------|-----------------|
+        | applicationName   | `WorkBuddy`      | `workbuddy-ai`  |
+        | desktop_version   | 5.8.3            | 5.8.4           |
+        | turingChannelId   | 109144           | **400111**      |
+        | endpoint          | workbuddy.cn     | workbuddy.ai    |
+
+    只存一份的话，国际版账号会带着**国内版的品牌段 + 国内版渠道号**出站 ——
+    上游一比对就知道「这不是我们的官方国际版客户端」，风控必然识别。
+
+    所以档案按 realm 存两份（`client_profile:cn` / `client_profile:global`），
+    现场探测也按 realm 各探一次（`wb_install` 支持 `realm=` 参数）。
+
+     **向后兼容**：旧的单份 `client_profile` 键仍被读取，视为 **cn 的那份**；
+    global 缺失时用「按 realm 现场探测」（探测不到则用已知的官方兜底值）。
     """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._saved: dict = {}
-        self._source: str = SOURCE_AUTO
-        self._detected: dict = {}
-        self._computed: dict | None = None
+        #: realm → 保存的档案（从 DB 读）
+        self._saved: dict[str, dict] = {}
+        #: realm → 档案来源（auto/saved）
+        self._source: dict[str, str] = {}
+        #: realm → 现场探测结果
+        self._detected: dict[str, dict] = {}
+        #: realm → 计算后的生效值
+        self._computed: dict[str, dict] = {}
         self._loaded_at: float = 0.0
         self._loaded: bool = False
 
     # -- DB 读写 ---------------------------------------------------------
     @staticmethod
-    def _load_db(db=None):
-        """从 DB 读 (saved_dict, source)。db=None 时自建会话。"""
+    def _load_db(db=None) -> tuple[dict[str, dict], dict[str, str]]:
+        """从 DB 读 ({realm: saved}, {realm: source})。db=None 时自建会话。
+
+        读两个来源：
+          * 新键 `client_profile:cn` / `client_profile:global`（按 realm 分档）
+          * 旧键 `client_profile`（单份，**视为 cn 的那份** —— 向后兼容）
+        """
         from admin.db import SessionLocal
         from admin.models import SystemSetting
 
         own = db is None
         if own:
             db = SessionLocal()
+        keys = [PROFILE_KEY, SOURCE_KEY] + [f"{PROFILE_KEY}:{r}" for r in _REALMS] \
+               + [f"{SOURCE_KEY}:{r}" for r in _REALMS]
         try:
             rows = {r.key: r.value for r in db.query(SystemSetting).filter(
-                SystemSetting.key.in_([PROFILE_KEY, SOURCE_KEY])).all()}
-            raw = rows.get(PROFILE_KEY) or ""
-            src = (rows.get(SOURCE_KEY) or SOURCE_AUTO).strip() or SOURCE_AUTO
+                SystemSetting.key.in_(keys)).all()}
+        except Exception as e:
+            _logger.debug("读取 client_profile 失败：%s", e)
+            return {}, {r: SOURCE_AUTO for r in _REALMS}
+        finally:
+            if own:
+                db.close()
+
+        saved: dict[str, dict] = {}
+        sources: dict[str, str] = {}
+        for realm in _REALMS:
+            raw = rows.get(f"{PROFILE_KEY}:{realm}") or ""
+            src = (rows.get(f"{SOURCE_KEY}:{realm}") or "").strip()
+            # 向后兼容：旧的无后缀键**只当作 cn 的那份**。
+            #
+            # 为什么不能给 global 也用：旧档案是国内版的参数
+            # （`ide_name=WorkBuddy`、`turing_product_name=WorkBuddy`、
+            #  桌面端版本 5.8.3）—— 让国际版继承它，等于把「国内版身份」
+            # 直接套到国际版请求上，正是要修的风控问题。
+            # 国际版那份若为空，就让它走「按 realm 现场探测 + 已知官方兜底」，
+            # 那比继承一份错参数准确得多。
+            if not raw and realm == "cn":
+                raw = rows.get(PROFILE_KEY) or ""
+            if not src and realm == "cn":
+                src = (rows.get(SOURCE_KEY) or "").strip()
+            src = src or SOURCE_AUTO
             if src not in _VALID_SOURCES:
                 src = SOURCE_AUTO
             data: dict = {}
@@ -330,20 +437,27 @@ class ClientProfileStore:
                     if isinstance(obj, dict):
                         data = obj
                 except Exception as e:
-                    _logger.warning("client_profile 解析失败，按空档案处理：%s", e)
-            return data, src
-        except Exception as e:
-            _logger.debug("读取 client_profile 失败：%s", e)
-            return {}, SOURCE_AUTO
-        finally:
-            if own:
-                db.close()
+                    _logger.warning("client_profile[%s] 解析失败，按空档案处理：%s", realm, e)
+            saved[realm] = data
+            sources[realm] = src
+        return saved, sources
 
     def refresh(self, db=None) -> None:
-        """强制重新加载（DB + 现场探测），并重算生效值。"""
+        """强制重新加载（DB + 按 realm 现场探测），并重算各 realm 的生效值。"""
         data, src = self._load_db(db)
-        det = snapshot()
-        computed = _compose(data, src, det)
+        det: dict[str, dict] = {}
+        computed: dict[str, dict] = {}
+        for realm in _REALMS:
+            #**按 realm 探测**：本机可能同时装了国内版与国际版，
+            # 两套参数（版本号/品牌段/渠道号）完全不同。
+            try:
+                d = snapshot(realm=realm)
+            except Exception as e:
+                _logger.warning("client_profile[%s] 现场探测失败：%s", realm, e)
+                d = {}
+            det[realm] = d
+            computed[realm] = _compose(data.get(realm) or {}, src.get(realm, SOURCE_AUTO), d,
+                                       realm=realm)
         with self._lock:
             self._saved = data
             self._source = src
@@ -366,47 +480,75 @@ class ClientProfileStore:
         if not fresh:
             self.refresh()
 
-    def detected(self) -> dict:
-        """本机现场探测结果（只含真实探测到的键）。"""
+    def detected(self, realm: str = "") -> dict:
+        """本机现场探测结果（只含真实探测到的键）。
+
+        `realm` 为空时返回 cn 的那份（旧调用零改动）；要 global 的显式传。
+        """
+        self._ensure_loaded()
+        r = _norm_realm(realm)
+        with self._lock:
+            return dict(self._detected.get(r) or {})
+
+    def detected_all(self) -> dict[str, dict]:
+        """两版各自的现场探测结果（后台页面同时展示用）。"""
         self._ensure_loaded()
         with self._lock:
-            return dict(self._detected)
+            return {r: dict(self._detected.get(r) or {}) for r in _REALMS}
 
     # -- 查询 ------------------------------------------------------------
-    def saved(self) -> dict:
-        """后台保存的档案（可能为空）。"""
+    def saved(self, realm: str = "") -> dict:
+        """后台保存的档案（可能为空）。`realm` 为空 = cn（旧调用零改动）。"""
         self._ensure_loaded()
+        r = _norm_realm(realm)
         with self._lock:
-            out = dict(self._saved)
+            out = dict(self._saved.get(r) or {})
             if isinstance(out.get("headers"), dict):
                 out["headers"] = dict(out["headers"])
             return out
 
-    def source(self) -> str:
-        """当前模式：auto | saved。"""
+    def source(self, realm: str = "") -> str:
+        """当前模式：auto | saved。`realm` 为空 = cn。"""
         self._ensure_loaded()
+        r = _norm_realm(realm)
         with self._lock:
-            return self._source
+            return self._source.get(r, SOURCE_AUTO)
 
-    def effective(self, db=None) -> dict:
+    def effective(self, db=None, realm: str = "") -> dict:
         """实际生效的档案：兜底 <- 探测/保存 <- 环境变量。
 
         这是所有调用方（构造 UA / 风控头 / 指纹）唯一该用的入口。
         结果被缓存，保存或 TTL 到期后重算。
+
+        `realm` 决定用哪一份（cn/global 参数本质不同，见类文档）。
+        为空 = cn，保持旧调用零改动。
         """
         if db is not None:
             self.refresh(db)
         else:
             self._ensure_loaded()
+        r = _norm_realm(realm)
         with self._lock:
-            if self._computed is not None:
+            comp = (self._computed or {}).get(r)
+            if comp is not None:
                 # headers 是嵌套 dict，必须单独复制：否则调用方改动返回值
                 # 会直接污染缓存里的档案（下一个请求就带着脏值出去）。
-                out = dict(self._computed)
-                out["headers"] = dict(self._computed.get("headers") or {})
+                out = dict(comp)
+                out["headers"] = dict(comp.get("headers") or {})
                 return out
         # 兜底：理论上 refresh() 一定填了 _computed，这里防御性重算一次
-        return _compose(self.saved(), self.source(), snapshot())
+        return _compose(self.saved(r), self.source(r), snapshot(realm=r), realm=r)
+
+    def effective_all(self, db=None) -> dict[str, dict]:
+        """两版各自的生效档案（后台同时展示；也便于对比排障）。"""
+        if db is not None:
+            self.refresh(db)
+        else:
+            self._ensure_loaded()
+        out: dict[str, dict] = {}
+        for r in _REALMS:
+            out[r] = self.effective(realm=r)
+        return out
 
     def sources(self, db=None) -> dict:
         """每个键当前取自哪一层（排障用）。"""
@@ -436,7 +578,7 @@ class ClientProfileStore:
         return out
 
 
-def _compose(saved: dict, src: str, detected: dict) -> dict:
+def _compose(saved: dict, src: str, detected: dict, realm: str = "") -> dict:
     """把三层（兜底 / 保存或探测 / 环境变量）合成最终生效档案。
 
     抽成纯函数是为了能被缓存：`effective()` 在每个请求上被调用，
@@ -456,6 +598,15 @@ def _compose(saved: dict, src: str, detected: dict) -> dict:
     实际生效的却是已保存值」的自相矛盾，正是这个 bug 的显性症状。
     """
     out = dict(DEFAULTS)
+    # 按 realm 覆盖兜底（两版的产品身份**本质不同**，见类文档）：
+    #   cn     : ide_name/turing_product_name = WorkBuddy, channel = 109144
+    #   global : ide_name = workbuddy-ai, turing_product_name = WorkBuddy AI,
+    #            channel = 400111
+    # 这些兜底只在「探测不到且没保存过」时生效，但正因为那种情况在服务器上
+    # 很常见（线上不装客户端），兜底值必须是对的 —— 否则国际版会带着
+    # 国内版身份出站。
+    if realm:
+        out.update(_REALM_DEFAULTS.get(_norm_realm(realm), {}))
     # headers 要按「兜底 -> 保存 -> 探测」逐层覆盖，不能整体替换：
     # 否则后台只改 Accept-Language 时，其余默认风控头会消失。
     out["headers"] = dict(DEFAULTS.get("headers") or {})
@@ -551,11 +702,16 @@ def _build_ua(desktop_version: str | None, cli_version: str | None,
 STORE = ClientProfileStore()
 
 
-def effective(db=None) -> dict:
-    return STORE.effective(db)
+def effective(db=None, realm: str = "") -> dict:
+    return STORE.effective(db, realm=realm)
 
 
-def effective_local() -> dict:
+def effective_all(db=None) -> dict[str, dict]:
+    """两版各自的生效档案（后台展示 / 对比排障用）。"""
+    return STORE.effective_all(db)
+
+
+def effective_local(realm: str = "") -> dict:
     """**不含 DB** 的生效档案：兜底 + 现场探测 + 环境变量。
 
     专给**模块导入期**用（如 `converter.py` / `admin/backend.py` 里的
@@ -564,62 +720,86 @@ def effective_local() -> dict:
 
     发请求请用 `effective()`（含后台保存值），本函数只是「没有 DB 时的等价物」。
     """
-    return _compose({}, SOURCE_AUTO, snapshot())
+    return _compose({}, SOURCE_AUTO, snapshot(realm=realm), realm=realm)
 
 
-def saved() -> dict:
-    return STORE.saved()
+def saved(realm: str = "") -> dict:
+    return STORE.saved(realm)
 
 
-def source() -> str:
-    return STORE.source()
+def source(realm: str = "") -> str:
+    return STORE.source(realm)
 
 
 def sources(db=None) -> dict:
     return STORE.sources(db)
 
 
-def snapshot_live() -> dict:
+def snapshot_live(realm: str = "") -> dict:
     """公开的现场探测（供后台「探测」按钮用，总是实时扫）。"""
-    return snapshot()
+    return snapshot(realm=realm)
 
 
-def detected() -> dict:
+def detected(realm: str = "") -> dict:
     """缓存过的现场探测结果（供后台展示；想强制实时用 snapshot_live）。"""
-    return STORE.detected()
+    return STORE.detected(realm)
+
+
+def detected_all() -> dict[str, dict]:
+    """两版的现场探测结果（后台同时展示）。"""
+    return STORE.detected_all()
 
 
 def invalidate() -> None:
     STORE.invalidate()
 
 
-def ua() -> str:
-    """出站 User-Agent（实时，带缓存）。"""
-    return effective().get("user_agent") or _build_ua(None, None)
+def ua(realm: str = "") -> str:
+    """出站 User-Agent（实时，带缓存）。
+
+    `realm` 决定用哪一版的产品身份：cn 品牌段 `WorkBuddy`、
+    global 品牌段 `workbuddy-ai`（实测自客户端源码，UA 第一段取
+    `cli/product.json` 的 `applicationName`）。
+    """
+    p = effective(realm=realm)
+    return p.get("user_agent") or _build_ua(
+        p.get("desktop_version"), p.get("cli_version"), p.get("application_name"))
 
 
-def desktop_version() -> str:
-    return str(effective().get("desktop_version") or DEFAULTS["desktop_version"])
+def desktop_version(realm: str = "") -> str:
+    return str(effective(realm=realm).get("desktop_version") or DEFAULTS["desktop_version"])
 
 
-def cli_version() -> str:
-    return str(effective().get("cli_version") or DEFAULTS["cli_version"])
+def cli_version(realm: str = "") -> str:
+    return str(effective(realm=realm).get("cli_version") or DEFAULTS["cli_version"])
 
 
-def turing_channel_id() -> int:
-    v = effective().get("turing_channel_id")
+def turing_channel_id(realm: str = "") -> int:
+    """风控渠道号。按 realm 取：cn=109144 / global=400111（实测两版不同）。
+
+    兜底也按 realm —— 硬编码单一值会让国际版报国内版渠道号（风控特征）。
+    """
+    v = effective(realm=realm).get("turing_channel_id")
     n = _int_or_none(v)
-    return n if n else 109144
+    if n:
+        return n
+    r = _norm_realm(realm)
+    from wb_install import REALM_FALLBACKS
+    return int(REALM_FALLBACKS.get(r, {}).get("turing_channel_id", 109144))
 
 
-def turing_product_name() -> str:
-    return str(effective().get("turing_product_name")
+def turing_product_name(realm: str = "") -> str:
+    return str(effective(realm=realm).get("turing_product_name")
                or DEFAULTS["turing_product_name"])
 
 
-def risk_headers() -> dict:
-    """官方客户端的风控/审计头（不含 IP、不含账号级与会话级头）。"""
-    p = effective()
+def risk_headers(realm: str = "") -> dict:
+    """官方客户端的风控/审计头（不含 IP、不含账号级与会话级头）。
+
+    `realm` 决定产品身份（`X-IDE-Name` / `X-IDE-Version` 等）——
+    两版的值不同，混用是明显的风控特征。
+    """
+    p = effective(realm=realm)
     name = str(p.get("ide_name") or DEFAULTS["ide_name"])
     h = {
         "X-IDE-Name": name,
@@ -683,15 +863,19 @@ def fingerprint(uid: str, machine_id: str = "", session_id: str = "") -> dict:
 # 保存 / 重置
 # ---------------------------------------------------------------------------
 def save(profile: Any, new_source: str | None = None, db=None,
-         merge: bool = True) -> dict:
+         merge: bool = True, realm: str = "cn") -> dict:
     """保存档案到 DB，并让新值立即生效。
 
     merge=True 时与已有保存值合并（后台「只改一个字段」的常见用法）；
     False 时整体替换。
+
+    `realm` 决定存到哪一份（`client_profile:cn` / `client_profile:global`）。
+    默认 cn —— 但**必须显式传 global 才能改到国际版那份**，避免误改。
     """
     from admin.db import SessionLocal
     from admin.models import SystemSetting
 
+    r = _norm_realm(realm)
     clean, errors = normalize(profile)
     if errors and not clean:
         return {"ok": False, "errors": errors}
@@ -700,7 +884,9 @@ def save(profile: Any, new_source: str | None = None, db=None,
     if own:
         db = SessionLocal()
     try:
-        current, cur_src = STORE._load_db(db)
+        all_saved, all_src = STORE._load_db(db)
+        current = all_saved.get(r) or {}
+        cur_src = all_src.get(r, SOURCE_AUTO)
         merged = dict(current) if merge else {}
         for k, v in clean.items():
             if k == "headers" and isinstance(v, dict) and merge:
@@ -715,35 +901,56 @@ def save(profile: Any, new_source: str | None = None, db=None,
             errors.append(f"source 只能是 {_VALID_SOURCES}，已按 {SOURCE_AUTO} 处理")
             src = SOURCE_AUTO
 
-        _upsert(db, SystemSetting, PROFILE_KEY,
+        _upsert(db, SystemSetting, f"{PROFILE_KEY}:{r}",
                 json.dumps(merged, ensure_ascii=False))
-        _upsert(db, SystemSetting, SOURCE_KEY, src)
+        _upsert(db, SystemSetting, f"{SOURCE_KEY}:{r}", src)
         db.commit()
         STORE.refresh(db)
     finally:
         if own:
             db.close()
 
-    return {"ok": True, "errors": errors, "saved": merged, "source": src}
+    return {"ok": True, "errors": errors, "saved": merged, "source": src, "realm": r}
 
 
-def reset(db=None) -> dict:
-    """清空保存的档案，回到「纯探测 + 兜底」。"""
+def save_both(cn: Any = None, global_: Any = None, new_source: str | None = None,
+              db=None, merge: bool = True) -> dict:
+    """一次保存两版（后台「探测并保存两版」用）。
+
+    两版分别走 `save()`，任一失败也继续尝试另一个（返回各自的 ok/errors）——
+    半成功总比整批失败好，且调用方能看清是哪一版出错。
+    """
+    out: dict[str, Any] = {}
+    if cn is not None:
+        out["cn"] = save(cn, new_source=new_source, db=db, merge=merge, realm="cn")
+    if global_ is not None:
+        out["global"] = save(global_, new_source=new_source, db=db, merge=merge,
+                             realm="global")
+    return {"ok": all(v.get("ok") for v in out.values()), "results": out}
+
+
+def reset(db=None, realm: str = "cn") -> dict:
+    """清空保存的档案，回到「纯探测 + 兜底」。（按 realm）"""
     from admin.db import SessionLocal
     from admin.models import SystemSetting
 
+    r = _norm_realm(realm)
     own = db is None
     if own:
         db = SessionLocal()
     try:
-        _upsert(db, SystemSetting, PROFILE_KEY, "")
-        _upsert(db, SystemSetting, SOURCE_KEY, SOURCE_AUTO)
+        _upsert(db, SystemSetting, f"{PROFILE_KEY}:{r}", "")
+        _upsert(db, SystemSetting, f"{SOURCE_KEY}:{r}", SOURCE_AUTO)
+        # 旧单份键（视为 cn 的那份）也要清，否则 reset 后会「复现」旧值
+        if r == "cn":
+            _upsert(db, SystemSetting, PROFILE_KEY, "")
+            _upsert(db, SystemSetting, SOURCE_KEY, SOURCE_AUTO)
         db.commit()
         STORE.refresh(db)
     finally:
         if own:
             db.close()
-    return {"ok": True}
+    return {"ok": True, "realm": r}
 
 
 def _upsert(db, model, key: str, value: str) -> None:
