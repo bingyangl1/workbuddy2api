@@ -75,6 +75,7 @@ scripts/*.py
 !scripts/update.py
 !scripts/security_baseline.py
 !scripts/panel_smoke_test.py
+!scripts/sign_release.py
 
 # ===== 强制保留（即便以点开头也要提交） =====
 !.gitignore
@@ -118,3 +119,6 @@ web-wip/
 # 本地引擎运行日志（诊断用，不入库）
 _eng.log
 _eng.err
+
+# ===== 发布签名私钥（绝不入库）=====
+_relkey/
