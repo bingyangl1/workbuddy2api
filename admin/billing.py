@@ -32,6 +32,35 @@ def _body(response):
     raise ValueError("billing_missing_resources")
 
 
+def _is_credit_unit(value) -> bool:
+    """该行的 `CapacityUnit` 是否是积分单位（容忍单复数与大小写）。
+
+    上游同一批数据里两种写法都出现过（实测）：
+
+        Free Plan Subscription  -> `CapacityUnit = "credits"`（复数）
+        Bonus Pack（gift）      -> `CapacityUnit = "credit"` （**单数**）
+
+    原实现用严格相等 `!= "credits"` 过滤，**把 gift 包整个丢掉** ——
+    症状是国际版账号的 250 积分在界面上完全不可见，且调度不会优先消耗它
+    （那 250 是会过期的）。
+
+    判定规则：
+      * 缺省 / 空 / 纯空白 → **为真**（老数据、部分接口不带该字段，宁可为真）
+      * 归一化后 **恰好**是 `credit` 或 `credits` → 为真
+      * 其它（`tokens` / `requests` / `usd` …）→ 为假
+
+    为什么用「恰好相等」而不是 `startswith("credit")`：后者会把
+    `credits_usd`（复合单位，语义完全不同）也算成积分 —— 那会把不同计量的
+    行混进积分汇总。已知的两种合法写法就是 `credit` / `credits`。
+    """
+    if value is None:
+        return True
+    s = str(value).strip().lower()
+    if not s:
+        return True
+    return s in ("credit", "credits")
+
+
 def _identity(row):
     for field in ("ResourceId", "AccountId", "PackageId"):
         if row.get(field) not in (None, ""):
@@ -113,7 +142,12 @@ def collect_billing(request):
             sources["legacy"] = {"ok": False, "complete": False, "error": type(exc).__name__}
     merged = {}
     for row in details:
-        if row.get("CapacityUnit", "credits") != "credits":
+        # 单位过滤必须容忍**单复数**：上游对 gift 包（`Bonus Pack`）返回的
+        # `CapacityUnit` 是 `credit`（单数），而其它包是 `credits`（复数）。
+        # 原来用严格相等 `!= "credits"`，于是**整个 gift 包被丢掉** ——
+        # 实测症状：国际版账号的 250 积分在界面上完全不可见
+        # （只剩 Free Plan 的 100），且「快到期优先用」策略也不会去烧它。
+        if not _is_credit_unit(row.get("CapacityUnit")):
             continue
         identity = _identity(row)
         merged[identity] = {**merged.get(identity, {}), **row}

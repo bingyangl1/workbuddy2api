@@ -322,7 +322,10 @@ class AccountSession:
         total = 0
         total_size = 0
         for a in resp.get("Accounts") or []:
-            if a.get("CapacityUnit") != "credits":
+            # 单位容忍单复数：gift 包（Bonus Pack）上游给的是 `credit`（单数），
+            # 严格等于 `credits` 会把它整包漏掉（实测：国际版 250 积分不可见）。
+            from admin.billing import _is_credit_unit
+            if not _is_credit_unit(a.get("CapacityUnit")):
                 continue
             total += a.get("CycleCapacityRemain") or 0
             total_size += a.get("CapacitySize") or 0
