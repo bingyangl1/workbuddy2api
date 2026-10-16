@@ -103,6 +103,15 @@ class _ChatStreamCM:
 
     async def __aenter__(self):
         urls = self._urls()
+        # 出站诊断：把「11128 的所有可能成因」一次打全，排查时看一行就够。
+        # 只在真正出站时打（构造 CM 但没用起来的情况不打，避免噪音）。
+        try:
+            _logger.info("%s → %s", _describe_outbound_headers(
+                self._headers_i, tag="chat-stream",
+                uid=str(getattr(self._sess_i, "_uid", "") or ""),
+                body=self._body), urls[0] if urls else "?")
+        except Exception:  # noqa: BLE001 诊断失败绝不影响请求
+            pass
         last_exc: Exception | None = None
         for i, url_i in enumerate(urls):
             self._ctx = self._client.stream("POST", url_i,
@@ -146,6 +155,14 @@ async def _post_chat_with_fallback(client, sess_i, body: dict, headers_i: dict):
     """
     acc_realm = getattr(sess_i, "realm", None) or "cn"
     urls = [realm_mod.chat_base(acc_realm) + p for p in realm_mod.chat_paths(acc_realm)]
+    # 出站诊断（与非流式路径同款，排查 11128 时看一行就够）
+    try:
+        _logger.info("%s → %s", _describe_outbound_headers(
+            headers_i, tag="chat-post",
+            uid=str(getattr(sess_i, "_uid", "") or ""), body=body),
+            urls[0] if urls else "?")
+    except Exception:  # noqa: BLE001
+        pass
     last_exc: Exception | None = None
     for i, url_i in enumerate(urls):
         try:
@@ -507,6 +524,69 @@ def _upstream_extra_headers(request: Request, purpose: str = "conversation",
     if body is not None:
         h.update(_session_headers(body, uid))
     return h
+
+
+def _describe_outbound_headers(headers: dict, *, tag: str, uid: str = "",
+                               body: dict | None = None) -> str:
+    """把出站请求的关键风控特征整理成**一行**诊断文本（供日志）。
+
+    ## 为什么需要（排查 11128 时踩过的坑）
+
+    `400 code=11128 "Illegal API invocation from an unapproved channel"` 有
+    **至少四种**互不相关的成因，而它们的现象完全一样：
+
+      1. `X-Device-Token` 缺失（桌面端不在 / Turing SDK 取不到 / 负缓存命中）
+      2. harness 脱敏没生效（system/tools 里的合规声明词被内容审核拦）
+      3. UA / 渠道号与账号的 realm 不匹配（国际版账号带国内版身份）
+      4. 会话头族缺失（`X-Conversation-*`）
+
+    出问题时只能靠「一行行加 print」逐个排除，非常低效。这个函数把**所有**
+    关键特征一次性打出来，看一行日志就能定位到是哪一类。
+
+    输出形态（示例）：
+
+        [chat] uid=bf798385-b868 acc_realm=global UA=workbuddy-ai/5.8.4 … |
+        device_token=OK(32ch) conv_id=OK(32ch) conv_req=OK(32ch) msg=OK(32ch) |
+        risk=4/4 body=model=auto tools=12 sys=list
+    """
+    h = headers or {}
+    parts: list[str] = [f"[{tag}]"]
+    if uid:
+        parts.append(f"uid={uid[:12]}")
+    ua = str(h.get("User-Agent") or "")
+    if ua:
+        # 只取品牌/版本段（前两段），避免日志被长 UA 撑爆
+        parts.append(f"UA={ua[:56]}")
+    else:
+        parts.append("UA=**MISSING**")
+
+    # 风控设备指纹 —— 11128 最常见的成因
+    dt = str(h.get("X-Device-Token") or "")
+    parts.append(f"device_token={f'OK({len(dt)}ch)' if dt else '**MISSING**'}")
+
+    # 会话头族（缺哪个报哪个）
+    for key, short in (("X-Conversation-ID", "conv_id"),
+                       ("X-Conversation-Request-ID", "conv_req"),
+                       ("X-Conversation-Message-ID", "conv_msg")):
+        v = str(h.get(key) or "")
+        parts.append(f"{short}={f'OK({len(v)}ch)' if v else '**MISSING**'}")
+
+    # 风控归属头（4 个）
+    risk_keys = ("X-IDE-Name", "X-IDE-Type", "X-IDE-Version", "X-Product")
+    have = sum(1 for k in risk_keys if h.get(k))
+    parts.append(f"risk={have}/4")
+    if have < 4:
+        parts.append(f"risk_missing={[k for k in risk_keys if not h.get(k)]}")
+
+    if isinstance(body, dict):
+        tools = body.get("tools")
+        sys_field = body.get("system")
+        parts.append(
+            f"body=model={body.get('model', '?')} "
+            f"tools={len(tools) if isinstance(tools, list) else 0} "
+            f"sys={type(sys_field).__name__}"
+        )
+    return " | ".join(parts)
 
 
 def _session_headers(body: dict, uid: str) -> dict:
