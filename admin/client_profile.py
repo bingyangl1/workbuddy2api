@@ -550,16 +550,17 @@ class ClientProfileStore:
             out[r] = self.effective(realm=r)
         return out
 
-    def sources(self, db=None) -> dict:
-        """每个键当前取自哪一层（排障用）。"""
+    def sources(self, db=None, realm: str = "") -> dict:
+        """每个键当前取自哪一层（排障用；``realm`` 决定看哪一版）。"""
         if db is not None:
             self.refresh(db)
         else:
             self._ensure_loaded()
+        r = _norm_realm(realm)
         with self._lock:
-            saved = dict(self._saved)
-            detected = dict(self._detected)
-            src = self._source
+            saved = dict((self._saved or {}).get(r) or {})
+            detected = dict((self._detected or {}).get(r) or {})
+            src = (self._source or {}).get(r)
         out: dict[str, str] = {}
         for k in set(list(DEFAULTS) + list(saved) + list(detected)):
             if k == "headers":
@@ -731,8 +732,8 @@ def source(realm: str = "") -> str:
     return STORE.source(realm)
 
 
-def sources(db=None) -> dict:
-    return STORE.sources(db)
+def sources(db=None, realm: str = "") -> dict:
+    return STORE.sources(db, realm)
 
 
 def snapshot_live(realm: str = "") -> dict:
