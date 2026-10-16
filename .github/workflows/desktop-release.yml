@@ -16,6 +16,19 @@ jobs:
           architecture: x64
           cache: pip
           cache-dependency-path: requirements-desktop-lock.txt
+      # Node：**必须**，因为 build_desktop.py 要构建 web/out（新面板静态产物）
+      # 再打进 EXE。CI 是干净 checkout，没有 web/out，必然会触发 `npm run build`。
+      # 之前漏了这两步 → build_desktop.py 在 npm 处失败（实测 run #1 就挂在这）。
+      # 用 setup-node 而不是「靠 runner 自带的 Node」：自带版本的 npm/缓存行为
+      # 不可控，且不带项目依赖（node_modules 没装）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
       - name: Verify release tag matches desktop version
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
