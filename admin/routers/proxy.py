@@ -477,9 +477,6 @@ def _session_headers(body: dict, uid: str) -> dict:
     """
     h: dict[str, str] = {}
     conv_id = pool.extract_session_key(body)
-    if conv_id:
-        # 透传客户端原值优先；客户端没给就不伪造（避免误导上游建错会话）
-        h["X-Conversation-ID"] = conv_id
     rk = pool.turn_key(body) or conv_id or ""
     if rk:
         digest = hashlib.sha256(rk.encode("utf-8", "replace")).hexdigest()
@@ -488,6 +485,35 @@ def _session_headers(body: dict, uid: str) -> dict:
         trace = digest[:32]
     else:
         trace = hashlib.sha256(f"{time.time_ns()}:{uid}".encode()).hexdigest()[:32]
+
+    # ── X-Conversation-ID：**恒发**（上游渠道校验要求，缺头直接 400）─────────
+    #
+    # 上游实证（HanawaBanana/workbuddy2api #36，逐账号直连实测）：
+    #
+    #   只要该头在场（**固定字符串即可，上游不校验会话是否存在**）就全部通过，
+    #   与账号无关 —— 是**请求维度**不是账号维度。缺头则返回：
+    #
+    #       400 code=11-128 "conversation id missing"
+    #       displayTips: 这次调用没通过渠道校验，可能不是官方客户端发出的。
+    #
+    # 而 DSH / Codex / Cherry Studio 这类 OpenAI 兼容客户端**普遍不在 body 里带
+    # conversationId** → 原实现（"客户端没给就不发"）让这类流量在部分账号上
+    # 100% 触发该错误。
+    #
+    # **关键细节（照抄上游的两层设计）**：
+    #   * 客户端给了原值 → 用原值（透传优先）
+    #   * 客户端没给     → 用**轮级聚合键**（与 X-Conversation-Request-ID 同源）
+    #     兜底，使「同一轮内换号重试」复用同一会话 ID（与聚合语义对齐）
+    #
+    # 为什么兜底值不能写进 prompt_cache_key 的会话段：那是**轮级**键，逐轮变化，
+    # 写进去会让「无会话键客户端」的前缀缓存每轮都失效。所以这里只影响出站头。
+    if conv_id:
+        h["X-Conversation-ID"] = conv_id
+    else:
+        # 轮级聚合键兜底：rk 为空时为请求级随机（trace 就是那一档）
+        h["X-Conversation-ID"] = (hashlib.sha256(
+            f"conv:{rk or trace}".encode("utf-8", "replace")).hexdigest()[:32])
+
     # 消息级 ID：每条独立（32 hex，与官方 X-Request-ID 形态一致）
     mid = hashlib.sha256(f"{time.time_ns()}:{uid}:msg".encode()).hexdigest()[:32]
     h["X-Conversation-Message-ID"] = mid
