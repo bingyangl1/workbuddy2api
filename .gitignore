@@ -122,3 +122,7 @@ _eng.err
 
 # ===== 发布签名私钥（绝不入库）=====
 _relkey/
+
+# 面板冒烟测试输出（本地验收用，不入库）
+_fulltest.json
+scripts/_fulltest.json

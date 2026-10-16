@@ -359,7 +359,28 @@ export const syncApi = {
   config: () => get<Record<string, unknown>>('/api/sync/config'),
   saveConfig: (body: Record<string, unknown>) =>
     post<Record<string, unknown>>('/api/sync/config', body),
-  push: () => post<{ok: boolean; pushed: number}>('/api/sync/push'),
+  // 带上当前输入框的 remote_url/secret：服务端会先落库再推送，用户不必先点保存
+  // （契约见 routers/sync.py::push —— body 可空，优先用请求体里的值）
+  push: (body?: {remote_url?: string; secret?: string}) =>
+    post<{ok: boolean; remote: string; accounts: number; models: number;
+          client_profile: boolean; remote_result: Record<string, unknown>}>(
+      '/api/sync/push', body ?? {}),
+};
+
+/* ── 逆向产物（routers/app_source.py，需 ADMIN_DEV_TOOLS=1）──────── */
+export const appSourceApi = {
+  status: () => get<Record<string, unknown>>('/api/app-source/status'),
+  detect: () => post<Record<string, unknown>>('/api/app-source/detect'),
+  locate: (path: string) => post<Record<string, unknown>>('/api/app-source/locate', {path}),
+  resetPaths: () => post<Record<string, unknown>>('/api/app-source/reset-paths'),
+  unpackPlan: () => post<Record<string, unknown>>('/api/app-source/unpack/plan'),
+  unpack: (dest: string, force = false) =>
+    post<Record<string, unknown>>('/api/app-source/unpack', {dest, force}),
+  unpackProgress: () => get<Record<string, unknown>>('/api/app-source/unpack/progress'),
+  remove: () => post<Record<string, unknown>>('/api/app-source/remove'),
+  search: (q: string, limit = 20) =>
+    get<{items: {file: string; line: number; text: string}[]}>(
+      '/api/app-source/search', {q, limit}),
 };
 
 /* ── 系统（server.py + routers/releases.py）────────────────────── */

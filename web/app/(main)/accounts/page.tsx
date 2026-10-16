@@ -53,7 +53,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {AlertTriangle, Coins, Download, Flame, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2, Wrench} from 'lucide-react';
+import {AlertTriangle, Cat, Coins, Download, Flame, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2, Wrench} from 'lucide-react';
 
 export default function AccountsPage() {
   const t = useT();
@@ -70,6 +70,8 @@ export default function AccountsPage() {
   const [creditOf, setCreditOf] = useState<Account | null>(null);
   const [deleteOf, setDeleteOf] = useState<Account | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [catId, setCatId] = useState<number | null>(null);
+  const [catBatchOpen, setCatBatchOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
@@ -130,6 +132,54 @@ export default function AccountsPage() {
     }
   }
 
+  /** 猫猫旅行：同意协议 → 首次领养(+300) → 派出 → 领奖（会真实触达上游）。
+   *  返回结构化分步结果，直接拼成人话摘要，用户不必去积分明细核对。 */
+  async function catTravel(a: Account) {
+    setCatId(a.id);
+    try {
+      const r = await accountApi.catTravel(a.id) as {
+        adopted?: boolean; credits?: number; detail?: string;
+        steps?: {step?: string; ok?: boolean; credits?: number}[];
+      };
+      const parts: string[] = [];
+      if (r.adopted) parts.push(t('accounts.catTravelAdopted', {n: 300}));
+      if (r.credits) parts.push(t('accounts.catTravelCredits', {n: r.credits}));
+      if (r.detail) parts.push(String(r.detail));
+      if (!parts.length && Array.isArray(r.steps)) {
+        for (const s of r.steps) {
+          if (s?.step) parts.push(`${s.step}${s.ok === false ? '✗' : '✓'}`);
+        }
+      }
+      notify.ok(t('accounts.catTravelOk', {detail: parts.join(' · ') || '—'}));
+      await load();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setCatId(null);
+    }
+  }
+
+  /** 批量猫猫旅行：对当前筛选出的启用账号逐个执行（顺序执行，避免上游风控）。 */
+  async function catTravelBatch() {
+    const targets = filtered.filter((a) => a.status === 'active');
+    setCatBatchOpen(false);
+    if (!targets.length) return;
+    let ok = 0, fail = 0;
+    for (const a of targets) {
+      setCatId(a.id);
+      try {
+        await accountApi.catTravel(a.id);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setCatId(null);
+    notify.ok(t('accounts.catTravelBatchStarted', {n: targets.length}),
+              `${ok} OK / ${fail} failed`);
+    await load();
+  }
+
   async function syncAllCredits() {
     setSyncing(true);
     try {
@@ -178,6 +228,11 @@ export default function AccountsPage() {
             <Button variant="outline" size="sm" onClick={() => setToolsOpen(true)}>
               <Wrench className="h-4 w-4" />
               {t('accounts.tools')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCatBatchOpen(true)}
+                    disabled={!!catId || !filtered.some((a) => a.status === 'active')}>
+              <Cat className={cn('h-4 w-4', catId !== null && 'animate-bounce')} />
+              {t('accounts.catTravelBatch')}
             </Button>
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -268,6 +323,11 @@ export default function AccountsPage() {
                               disabled={busyId === a.id} onClick={() => refreshBalance(a)}>
                         <RefreshCw className={cn('h-4 w-4', busyId === a.id && 'animate-spin')} />
                       </Button>
+                      <Button variant="ghost" size="sm" title={t('accounts.catTravelHint')}
+                              disabled={catId === a.id || a.status !== 'active'}
+                              onClick={() => catTravel(a)}>
+                        <Cat className={cn('h-4 w-4', catId === a.id && 'animate-bounce')} />
+                      </Button>
                       <Button variant="ghost" size="sm"
                               title={a.status === 'active' ? t('accounts.disable') : t('accounts.enable')}
                               disabled={busyId === a.id} onClick={() => toggleStatus(a)}>
@@ -308,6 +368,25 @@ export default function AccountsPage() {
             <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90"
                                onClick={(e) => { e.preventDefault(); doDelete(); }}>
               {t('accounts.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 批量猫猫旅行确认（会真实触达上游，必须显式确认） */}
+      <AlertDialog open={catBatchOpen} onOpenChange={setCatBatchOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('accounts.catTravelBatch')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('accounts.catTravelBatchConfirm',
+                 {n: filtered.filter((a) => a.status === 'active').length})}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); catTravelBatch(); }}>
+              {t('accounts.catTravel')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

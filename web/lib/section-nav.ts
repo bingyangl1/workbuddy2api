@@ -56,7 +56,8 @@ export type SectionNavIconKey =
   | 'keys'
   | 'redPackets'
   | 'models'
-  | 'playground';
+  | 'playground'
+  | 'settings';
 
 export type SectionNavItem = {
   /** 稳定标识，与 `href` 一一对应。测试与调试用。 */
@@ -70,7 +71,7 @@ export type SectionNavItem = {
 };
 
 /** 有二级导航的「节」。顺序即 `sectionNavFromPath` 的匹配顺序。 */
-export const SECTIONS = ['accounts', 'keys', 'models'] as const;
+export const SECTIONS = ['accounts', 'keys', 'models', 'settings'] as const;
 
 export type SectionKey = (typeof SECTIONS)[number];
 
@@ -93,6 +94,12 @@ export const SECTION_NAV: Record<SectionKey, readonly SectionNavItem[]> = {
     {key: 'models', href: '/models', labelKey: 'nav.models', iconKey: 'models'},
     {key: 'catalog', href: '/models/catalog', labelKey: 'nav.catalog', iconKey: 'models'},
     {key: 'playground', href: '/playground', labelKey: 'nav.playground', iconKey: 'playground'},
+  ],
+  settings: [
+    {key: 'settings', href: '/settings', labelKey: 'nav.settings', iconKey: 'settings'},
+    {key: 'sync', href: '/settings/sync', labelKey: 'sync.title', iconKey: 'settings'},
+    {key: 'password', href: '/settings/password', labelKey: 'password.title', iconKey: 'settings'},
+    {key: 'appSource', href: '/settings/app-source', labelKey: 'appSource.title', iconKey: 'settings'},
   ],
 };
 

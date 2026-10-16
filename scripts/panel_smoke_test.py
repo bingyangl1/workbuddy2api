@@ -39,6 +39,9 @@ PAGES = [
     ("/schedules/", "定时任务"),
     ("/growth/", "成长计划"),
     ("/settings/", "系统设置"),
+    ("/settings/sync/", "线上同步"),
+    ("/settings/password/", "修改密码"),
+    ("/settings/app-source/", "逆向产物"),
     ("/backup/", "数据备份"),
     ("/changelog/", "更新日志"),
 ]
@@ -112,6 +115,14 @@ def goto(path, settle=2.6):
         if js("document.readyState") == "complete":
             break
         time.sleep(0.4)
+    # 内容就绪判定：`readyState==complete` 只说明**网络**完成，不代表 React 已渲染
+    # （首轮遍历冷启动时实测 body 只有 ~26 字符的骨架，导致假失败）。
+    # 等到出现 h1 / 骨架 / 错误态之一，最多再等 15s。
+    for _ in range(30):
+        if js("!!(document.querySelector('h1') || "
+              "document.querySelector('[role=alert],[role=status],.animate-pulse'))"):
+            break
+        time.sleep(0.5)
     time.sleep(settle)
     drain()
 
