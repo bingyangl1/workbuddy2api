@@ -39,12 +39,23 @@ jobs:
             Write-Warning "RELEASE_SIGNING_KEY secret 未配置——跳过签名（发布包将没有 .sig）"
             exit 0
           }
-          $files = @(Get-ChildItem dist/*.exe, dist/*.sha256 -ErrorAction SilentlyContinue)
-          if ($files.Count -eq 0) { throw "dist/ 下没有可签名的产物" }
+          Write-Host "已检测到 RELEASE_SIGNING_KEY（$($env:RELEASE_SIGNING_KEY.Length) 字符）"
+          # 显式判断目录存在：`Get-ChildItem dist/*.exe` 在 dist/ 缺失时是**终止性错误**，
+          # 不是返回空集合——会让这步以「找不到路径」失败，掩盖真正原因。
+          if (-not (Test-Path dist)) { throw "build_desktop.py 没有产出 dist/ 目录" }
+          # 分别收集再合并：一次 `-Path a, b` 的多通配形式在部分 PowerShell 版本上
+          # 行为不一致（实测踩过只收到其中一类），显式两段最稳。
+          $files = @(Get-ChildItem -Path dist\*.exe -File -ErrorAction SilentlyContinue) +
+                   @(Get-ChildItem -Path dist\*.sha256 -File -ErrorAction SilentlyContinue)
+          if ($files.Count -eq 0) { throw "dist/ 下没有可签名的产物（.exe / .sha256）" }
+          Write-Host "待签名文件："
+          $files | ForEach-Object { Write-Host "  - $($_.Name) ($($_.Length) bytes)" }
           python scripts/sign_release.py sign @($files.FullName)
           if ($LASTEXITCODE -ne 0) { throw "签名失败" }
+          Write-Host "--- 用仓库内置公钥自检验签 ---"
           python scripts/sign_release.py verify @($files.FullName)
           if ($LASTEXITCODE -ne 0) { throw "签名自检失败" }
+          Write-Host "✅ 全部产物已签名并验签通过"
       - uses: actions/upload-artifact@v4
         with:
           name: WorkBuddy2API-windows-x64
