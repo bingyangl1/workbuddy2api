@@ -116,10 +116,23 @@ def _account_row(acc: Account, snapshot: dict, next_n: int = 4) -> dict:
 
 #: 默认只统计活跃账号 —— 禁用号的积分不会再被消耗，把它们混进
 #: 「快到期额度合计」会虚高危险额度，让用户以为有大笔积分要作废。
-def _load_rows(db: Session, include_disabled: bool = False) -> list[Account]:
+def _load_rows(db: Session, include_disabled: bool = False,
+               realm: str = "") -> list[Account]:
+    """取积分统计要用的账号行。
+
+    `realm` 用于**按版本过滤**（空 = 不过滤，保持既有行为零回归）。
+
+    为什么需要它：用户报告「国际版剩余积分显示有问题，我账号可用积分是
+    100+250，但只显示 100」。根因虽然在上游字段的单复数（见 `admin/billing.py`
+    的 `_is_credit_unit`），但**面板也需要能只看某一版** —— 否则国内版和国际版
+    的积分混在一个汇总里，看不出「是哪一版的账号缺积分」。
+    两版的积分体系本来就不通用（不同的上游域、不同的计费规则）。
+    """
     q = db.query(Account)
     if not include_disabled:
         q = q.filter(Account.status == "active")
+    if realm in ("cn", "global"):
+        q = q.filter(Account.realm == realm)
     return q.order_by(Account.id.asc()).all()
 
 
@@ -129,6 +142,7 @@ def credit_expiry_stats(
     include_disabled: bool = False,
     package_limit: int = 60,
     package_offset: int = 0,
+    realm: str = "",
     _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
@@ -155,7 +169,7 @@ def credit_expiry_stats(
     里「30 天以外」那一段靠 `total_remaining - (≤30天) - 长期有效` 得出。
     """
     now = credit_rules.now_ms()
-    accounts = _load_rows(db, include_disabled)
+    accounts = _load_rows(db, include_disabled, realm)
     # 列表接口每个账号只带 4 个「最近到期」包（表格每行只用 2 个），
     # 完整明细走 /api/accounts/{id}/credit-details —— 这是响应体积的关键。
     rows = [_account_row(a, _snapshot_of(a), next_n=4) for a in accounts]
@@ -244,6 +258,8 @@ def credit_expiry_stats(
             "at_risk_ratio": (round(expiring_soon / total_remaining, 4)
                               if total_remaining > 0 else 0.0),
             "packages_total": len(flat),
+            # 回显本次统计的范围（前端可据此确认"我看的是哪一版"）
+            "realm": realm or "all",
         },
         "windows": windows,
         "accounts": rows,
@@ -253,6 +269,8 @@ def credit_expiry_stats(
         "package_offset": package_offset,
         "package_limit": package_limit,
         "has_more": package_offset + len(page) < len(flat),
+        "realm": realm or "all",
+        "accounts_total": len(accounts),
     }
 
 
@@ -261,6 +279,7 @@ def credit_usage_stats(
     days: int = 7,
     account_id: Optional[int] = None,
     top: int = 20,
+    realm: str = "",
     _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
@@ -269,9 +288,20 @@ def credit_usage_stats(
     与 `/api/stats/usage` 的区别：那边是「平台整体用量」视角，
     这边是**积分视角**（只看 credits，且默认把「余额 × 到期」串起来看），
     供积分统计页展示「谁在烧、烧了多少、还剩多少、还剩多久」。
+
+    `realm` 按版本过滤（空 = 不过滤，零回归）。两版积分体系不通用，
+    混在一起看不出「是哪一版的账号在烧、哪一版还够用」。
     """
     since = datetime.utcnow() - timedelta(days=max(1, days))
     ok_filter = UsageLog.error_kind.in_(("", "success"))
+
+    # realm 过滤：先用账号表求出该版的账号 id 集合。
+    # 无账号时用 ``in_([])`` 让查询天然返回空（而不是退化成「不过滤」——
+    # 那会把另一版的消耗混进来，比返回空更误导）。
+    realm_ids: list[int] | None = None
+    if realm in ("cn", "global"):
+        realm_ids = [a.id for a in db.query(Account.id)
+                     .filter(Account.realm == realm).all()]
 
     q = db.query(
         UsageLog.account_id,
@@ -281,13 +311,15 @@ def credit_usage_stats(
     ).filter(UsageLog.created_at >= since)
     if account_id is not None:
         q = q.filter(UsageLog.account_id == account_id)
+    if realm_ids is not None:
+        q = q.filter(UsageLog.account_id.in_(realm_ids or [-1]))
     rows = (q.filter(ok_filter)
             .group_by(UsageLog.account_id)
             .order_by(func.coalesce(func.sum(UsageLog.credits), 0.0).desc())
             .limit(max(1, min(200, top)))
             .all())
 
-    accounts = {a.id: a for a in _load_rows(db, True)}
+    accounts = {a.id: a for a in _load_rows(db, True, realm)}
     usage = []
     for aid, reqs, credits_used, tokens in rows:
         acc = accounts.get(aid)
@@ -325,4 +357,5 @@ def credit_usage_stats(
              "credits": round(float(cr or 0), 4)}
             for m, c, cr in by_model
         ],
+        "realm": realm or "all",
     }

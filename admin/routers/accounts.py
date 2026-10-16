@@ -1171,20 +1171,28 @@ def _ms_to_str(ts) -> str:
 
 
 @router.post("/credits/sync")
-def sync_credits(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """立即重新采集**全部活跃账号**的积分到期快照。
+def sync_credits(realm: str = "",
+                 _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """立即重新采集积分到期快照。
+
+    `realm` 为空 = **全部活跃账号**（既有行为，零回归）；
+    传 `cn` / `global` 时只采集该版 —— 面板按版本查看时不必把另一版也拉一遍。
+
+    ⚠️ 本端点**会真实请求上游**（逐号拉账单）。账号多时务必用 realm 收窄范围，
+    或改用定时任务；避免频繁全量触发（批量并发请求上游本身就是明显的机器特征）。
 
     与整点定时任务 `refresh_credits` 走同一份实现（`_sync_credit_snapshot`），
     避免「手动刷新」和「自动刷新」出现两套口径这种经典问题。
 
-    串行 + 每号间隔，与保活/批量任务的节流规则一致：批量并发请求上游
-    本身就是很明显的机器特征。账号多时耗时会到几十秒，故前端应按后台任务
-    的节奏处理（这里返回逐号结果，供前端展示进度）。
+    串行 + 每号间隔，与保活/批量任务的节流规则一致。账号多时耗时会到几十秒，
+    故前端应按后台任务的节奏处理（这里返回逐号结果，供前端展示进度）。
     """
     from admin.config import settings
 
-    accounts = (db.query(Account).filter(Account.status == "active")
-                .order_by(Account.id.asc()).all())
+    q = db.query(Account).filter(Account.status == "active")
+    if realm in ("cn", "global"):
+        q = q.filter(Account.realm == realm)
+    accounts = q.order_by(Account.id.asc()).all()
     ok = 0
     failed = 0
     detail: list[dict] = []
@@ -1220,6 +1228,7 @@ def sync_credits(_: bool = Depends(require_admin), db: Session = Depends(get_db)
     return {
         "ok": True, "total": len(accounts), "refreshed": ok, "failed": failed,
         "credits_expiring_soon": expiring,
+        "realm": realm or "all",
         "detail": detail,
     }
 
