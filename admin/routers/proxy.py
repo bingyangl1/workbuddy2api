@@ -256,6 +256,58 @@ except Exception:  # pragma: no cover - 降级分支
     _DESENSITIZE_AVAILABLE = False
     desensitize_body = None
 
+
+def _desensitize_chat_body(chat_body: dict, *, tag: str = "") -> dict:
+    """harness 脱敏的**统一入口**（三个出站协议路径共用一份实现）。
+
+    ## 为什么需要这个函数（真实 bug）
+
+    上游内容审核会把 system/tools 里的**合规声明词**（DoS / exploit /
+    credential testing…）误判成敏感内容并**整条拒绝**请求 —— 典型报错
+    `400 code=11128 "Illegal API invocation from an unapproved channel"`。
+
+    而 Claude Code 的 system prompt 是固定 harness 模板，**必然含这些词**。
+    所以脱敏（harness 压缩 + 零宽空格）不做就没法用。
+
+    **原实现只在 `/v1/messages`（Claude Code 路径）做了这一步**，导致一个
+    很迷惑的现象：
+
+        Claude Code 能用，但用 OpenAI 协议的客户端（DSH / Cursor / Cherry
+        Studio…）发同样的请求就报 11128。
+
+    因为它们的 system/tools 里也有同样的合规声明词，只是没人给它脱敏。
+    上游 `xiaofan6ya/workbuddy2api@bd6ad90e` 修了同一处（抽出
+    `_desensitize_chat_body` 并接入 chat/responses）。
+
+    ## 行为
+
+    失败一律**按原样发送**（脱敏是增强，不该成为新的失败点）。
+    `tag` 只用于日志区分是哪个端点触发的。
+    """
+    if not (_DESENSITIZE_AVAILABLE and settings.ANTHROPIC_DESENSITIZE):
+        return chat_body
+    try:
+        raw_len = len(json.dumps(chat_body, ensure_ascii=False))
+        out = desensitize_body(
+            chat_body,
+            roles=("system", "developer"),
+            desensitize_harness_user=True,
+            desensitize_tools=True,
+            compact_harness=not settings.ANTHROPIC_NO_COMPACT,
+            strip_tool_metadata=True,
+        )
+        _logger.info(
+            "harness 脱敏%s %d -> %d 字节（compact=%s）",
+            f"[{tag}]" if tag else "",
+            raw_len, len(json.dumps(out, ensure_ascii=False)),
+            not settings.ANTHROPIC_NO_COMPACT,
+        )
+        return out
+    except Exception as e:
+        _logger.warning("harness 脱敏失败，按原样发送%s：%s",
+                        f"[{tag}]" if tag else "", e)
+        return chat_body
+
 # 上游流式 delta 的「空占位字段」归一（tool_calls:[] / function_call:null 等），
 # 外加「提交前缓冲」封装。这些空值会被一部分客户端误判成「工具调用开始」，
 # 把一次思考切成几十上百块。与 converter 的 /gw 端点共用同一实现，避免两处行为漂移。
@@ -2419,6 +2471,18 @@ async def chat_completions(
 
     body = dict(payload)
     body["stream"] = True
+    # harness 脱敏（**三个出站协议路径必须一致**）。
+    #
+    # 原来只有 /v1/messages 做了这一步，于是出现「Claude Code 能用、OpenAI 协议的
+    # 客户端发同样请求报 11128」。原因：OpenAI 客户端（DSH / Cursor / Cherry
+    # Studio…）的 system/tools 里也有那批合规声明词（"DoS attacks" / "exploit
+    # development" / "credential testing"…）—— 上游内容审核把它们当敏感内容整条
+    # 拒收。少了脱敏，这类客户端基本发不出去（简单 hello 却会通过，很容易误判）。
+    #
+    # 位置：在会话粘性键计算**之前** —— 脱敏会压缩 system/tools 文本，而
+    # `session_key_for` 取的是最后一条 user 消息（不受影响），放前面可保证
+    # 出站 body 与粘性键来自同一份内容（避免「按 A 算键、发 B」的错位）。
+    body = _desensitize_chat_body(body, tag="chat")
     # 客户端是否要流式。OpenAI SDK 默认 stream=false，所以**不能**假定为 True。
     # 上游只支持流式，因此客户端要非流式时我们先向自己要 SSE、再内部聚合。
     client_wants_stream = bool(payload.get("stream", False))
@@ -2919,6 +2983,13 @@ async def responses_proxy(
     chat_body, _stats = project_responses_chat_body(chat_body)
     chat_body.setdefault("model", "auto")
     chat_body["stream"] = True
+    # harness 脱敏（与 /v1/messages、/v1/chat/completions 同一份实现）。
+    #
+    # 位置在 `project_responses_chat_body` **之后**：投影会裁剪/重排 messages
+    # （Responses 协议 → Chat 协议的翻译产物），先脱敏再投影等于白做 ——
+    # 投影后的文本又会带上原始 harness 段落。所以顺序必须是
+    # 「翻译 → 投影 → 脱敏」，保证真正出站的那份内容被处理过。
+    chat_body = _desensitize_chat_body(chat_body, tag="responses")
     opts = dict(chat_body.get("stream_options") or {})
     opts["include_usage"] = True
     chat_body["stream_options"] = opts
@@ -3398,22 +3469,10 @@ async def anthropic_messages(
     # "unapproved channel"）。这里做与 converter /gw 端点完全相同的 harness 压缩 +
     # 零宽空格脱敏：模型读到的仍是原词，后端的关键词匹配失效。少了这一步，
     # Claude Code 的真实请求基本发不出去（简单 hello 测试却会通过，很容易误判）。
-    if _DESENSITIZE_AVAILABLE and settings.ANTHROPIC_DESENSITIZE:
-        try:
-            _raw_len = len(json.dumps(chat_body, ensure_ascii=False))
-            chat_body = desensitize_body(
-                chat_body,
-                roles=("system", "developer"),
-                desensitize_harness_user=True,
-                desensitize_tools=True,
-                compact_harness=not settings.ANTHROPIC_NO_COMPACT,
-                strip_tool_metadata=True,
-            )
-            _logger.info("harness 脱敏 %d -> %d 字节（compact=%s）",
-                         _raw_len, len(json.dumps(chat_body, ensure_ascii=False)),
-                         not settings.ANTHROPIC_NO_COMPACT)
-        except Exception as e:
-            _logger.warning("harness 脱敏失败，按原样发送：%s", e)
+    #
+    # 走统一的 `_desensitize_chat_body`（原先这里是内联实现，chat/responses 那两条
+    # 路径没有这步脱敏 → 「CC 能用、OpenAI 协议发不出去」的根因）。
+    chat_body = _desensitize_chat_body(chat_body, tag="messages")
 
     requested = _map_anthropic_model(db, payload.get("model", "auto"), key)
 
