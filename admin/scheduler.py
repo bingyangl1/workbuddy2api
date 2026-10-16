@@ -183,12 +183,39 @@ def run_task(task: str, db, schedule: "Schedule | None" = None) -> dict:
                                if fail else ""))}
     if task == "sync_models":
         from admin.routers import models as models_router
-        res = models_router._do_sync_models(db)
-        if isinstance(res, dict) and "summary" not in res:
-            res["summary"] = (f"新增 {res.get('added', 0)} 个、"
-                              f"更新 {res.get('updated', 0)} 个，"
-                              f"共 {res.get('total_in_db', 0)} 个模型")
-        return res
+        # 两个 realm 各同步一次：模型清单按 realm 隔离（国际版加 `global:` 前缀），
+        # 只同步一版会让另一版在面板里一直显示旧数据。
+        # 某一版没有可用账号时跳过该版（不让整任务失败 —— 单版部署是常见形态）。
+        per_realm: dict = {}
+        total_added = total_updated = 0
+        for realm in ("cn", "global"):
+            try:
+                r = models_router._do_sync_models(db, realm=realm)
+            except Exception as exc:      # noqa: BLE001 单版失败不影响另一版
+                per_realm[realm] = {"ok": False, "error": str(exc)[:120]}
+                continue
+            per_realm[realm] = {"ok": True, "added": r.get("added", 0),
+                                "updated": r.get("updated", 0),
+                                "fetched": r.get("total_fetched", 0)}
+            total_added += r.get("added", 0)
+            total_updated += r.get("updated", 0)
+        ok_realms = [k for k, v in per_realm.items() if v.get("ok")]
+        if not ok_realms:
+            first_err = next((v.get("error") for v in per_realm.values()
+                              if v.get("error")), "无可用账号")
+            raise RuntimeError(f"两个 realm 都同步失败：{first_err}")
+        from admin.models import ModelConfig
+        return {
+            "task": task, "ok": True,
+            "realm_results": per_realm,
+            "added": total_added, "updated": total_updated,
+            "total_in_db": db.query(ModelConfig).count(),
+            "summary": "；".join(
+                f"{'国内版' if k == 'cn' else '国际版'} 新增 {v.get('added', 0)}/更新 {v.get('updated', 0)}"
+                for k, v in per_realm.items() if v.get("ok")
+            ) + (f"（{'、'.join('国内版' if k == 'cn' else '国际版' for k in per_realm if not per_realm[k].get('ok'))} 跳过：无可用账号）"
+                 if len(ok_realms) < 2 else ""),
+        }
     if task == "daily_checkin":
         return run_daily_checkin(db, schedule)
     if task == "refresh_growth_tasks":

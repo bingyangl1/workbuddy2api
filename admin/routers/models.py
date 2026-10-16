@@ -99,16 +99,41 @@ def model_busy(_: bool = Depends(require_admin_read), db: Session = Depends(get_
             "observed_at": result["observed_at"], "stale": result["stale"]}
 
 
-def _do_sync_models(db: Session) -> dict:
+def _pick_sync_account(db: Session, realm: str) -> Account | None:
+    """为「同步模型清单」挑一个能调上游的账号（按 realm 过滤）。
+
+    ## 为什么必须按 realm 挑（真实缺陷）
+
+    原实现是 `db.query(Account).filter(status=='active', balance_remain>0).first()`
+    —— **取的是 id 最小的那条**。而账号是按导入顺序入库的，国内版通常先导
+    → 于是**面板切到国际版再点同步，拉回来的仍是国内版模型清单**。
+
+    用户实测报告过这个现象：「不管选国际版还是国内版，同步的都是国内版的模型」。
+    根因就在这里：端点根本没有 realm 参数，挑号也不看 realm。
+
+    挑号顺序（同 realm 内）：
+      1. 有余额的活跃账号（能正常调上游）
+      2. 退而求其次：任何活跃账号（余额字段可能还没同步过）
+    """
+    q = db.query(Account).filter(Account.status == "active")
+    if realm in ("cn", "global"):
+        q = q.filter(Account.realm == realm)
+    return (q.filter(Account.balance_remain > 0).first()
+            or q.first())
+
+
+def _do_sync_models(db: Session, realm: str = "cn") -> dict:
     """从后端拉取可用模型列表并同步到本地数据库（upsert）。
 
-    需要一个有效账号来调用后端 API；优先选 active 且余额 > 0 的账号。
+    `realm` 决定用哪一版的账号去拉、以及清单归属哪一版（`cn:` / `global:` 前缀）。
     """
-    acc = db.query(Account).filter(
-        Account.status == "active", Account.balance_remain > 0
-    ).first()
+    acc = _pick_sync_account(db, realm)
     if not acc:
-        raise HTTPException(status_code=503, detail="无可用账号（无法连接后端获取模型列表）")
+        # 报错信息要说清是哪一版没有账号 —— 否则用户会以为「账号池是空的」
+        label = {"cn": "国内版", "global": "国际版"}.get(realm, realm or "默认")
+        raise HTTPException(
+            status_code=503,
+            detail=f"无可用账号（{label}）：无法连接后端获取模型列表")
     try:
         with backend.AccountSession(acc.auth_json) as sess:
             models_raw = sess.fetch_models()
@@ -119,6 +144,10 @@ def _do_sync_models(db: Session) -> dict:
 
     import re
 
+    # realm 前缀：两版模型可能同名但能力/倍率不同（realm 隔离的核心）。
+    # 国内版沿用历史的「无前缀」形态（零回归），国际版加 `global:` 前缀。
+    prefix = "" if realm in ("", "cn") else f"{realm}:"
+
     added = 0
     updated = 0
     seen = {m.model_id for m in db.query(ModelConfig.model_id).all()}
@@ -126,6 +155,7 @@ def _do_sync_models(db: Session) -> dict:
         mid = m.get("id")
         if not mid or mid.lower() == "auto":
             continue  # 跳过上游聚合模型 "auto"，我们系统有自己的免费优先 auto 逻辑
+        mid = f"{prefix}{mid}" if prefix and not mid.startswith(prefix) else mid
         # 解析积分倍率
         raw_credits = m.get("credits") or ""
         multiplier = 0.0
@@ -161,6 +191,8 @@ def _do_sync_models(db: Session) -> dict:
     total = db.query(ModelConfig).count()
     enabled_count = db.query(ModelConfig).filter(ModelConfig.enabled == 1).count()
     return {
+        "realm": realm or "cn",
+        "source_account_id": acc.id,
         "total_fetched": len(models_raw),
         "added": added,
         "updated": updated,
@@ -170,9 +202,18 @@ def _do_sync_models(db: Session) -> dict:
 
 
 @router.post("/sync")
-def sync_models(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    """从后端拉取可用模型列表并同步到本地数据库（upsert）。"""
-    return _do_sync_models(db)
+def sync_models(
+    realm: str = "cn",
+    _: bool = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """从后端拉取可用模型列表并同步到本地数据库（upsert）。
+
+    `realm` 必传对（默认 cn 保持零回归）：面板右上角切到国际版时，
+    前端要传 `realm=global`，否则会拿国内版账号去拉、把国内版清单写进库里
+    （用户实测报过这个现象）。
+    """
+    return _do_sync_models(db, realm=realm)
 
 
 @router.get("/catalog")
