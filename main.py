@@ -150,7 +150,29 @@ def _pump(stream, log_path: Path, tag: str) -> None:
     except Exception:
         lf = None
     try:
-        for raw in iter(stream.readline, ""):
+        # **逐行读取要能扛住解码错误**：
+        # `for raw in iter(stream.readline, "")` 里，readline() 自身就可能抛
+        # UnicodeDecodeError（Popen 没指定 encoding 时会用系统默认编码）——
+        # 而它在 `for` 的**迭代器内部**抛出，外层的 try/finally 只能兜住
+        # 「跳出循环」，救不了「已经死掉的读取」；实测日志里那条
+        # `Exception in thread Thread-1 (_pump)` 就是这么来的。
+        # 所以这里手动循环 + 单独包住 readline，坏行丢弃、继续读。
+        err_streak = 0
+        while True:
+            try:
+                raw = stream.readline()
+                err_streak = 0
+            except UnicodeDecodeError:
+                # 解不出来的行：丢掉它，但**必须继续读**（否则管道积压→子进程卡死）。
+                # 但要防「readline 一个字节都不消费」时变成 CPU 空转死循环：
+                # 连续失败到上限就收手（此时把管道交给 finally 的排空逻辑）。
+                err_streak += 1
+                if err_streak >= 50:
+                    _log(f"[{tag}] 连续 {err_streak} 行解码失败，停止回显（管道仍会被排空）")
+                    break
+                continue
+            except Exception:
+                break
             if not raw:
                 break
             # 1) 控制台回显：失败不算事，接着读
@@ -171,11 +193,19 @@ def _pump(stream, log_path: Path, tag: str) -> None:
                     lf = None       # 之后只排空管道，不再尝试写盘
     finally:
         # 无论如何都要把管道读到 EOF：这是保证子进程不被写阻塞的最后一道保险。
-        try:
-            for _ in iter(stream.readline, ""):
-                pass
-        except Exception:
-            pass
+        # 带上限是因为「readline 每次都抛异常且不消费数据」会让这里 CPU 空转
+        # （正常 EOF 时 readline 返回 '' 会直接 break，不会走到计数上）。
+        drain_streak = 0
+        while True:
+            try:
+                if not stream.readline():
+                    break
+                drain_streak = 0
+            except Exception:
+                drain_streak += 1
+                if drain_streak >= 500:
+                    break           # 彻底放弃排空（总比无限空转好）
+                continue
         if lf is not None:
             try:
                 lf.close()
@@ -774,6 +804,25 @@ def main() -> None:
     _logfiles: list = []
     stop = threading.Event()
 
+    # 子进程环境：强制 UTF-8。
+    #
+    # **为什么必须**（实测事故）：中文 Windows 上 `sys.stdout` 默认编码是 GBK，
+    # 而我们的日志里全是中文（uvicorn 的启动横幅、`[admin]` 前缀的消息等）。
+    # 不设这两个变量时，子进程自己 `print` 中文/emoji 就会抛
+    # `UnicodeEncodeError: 'gbk' codec can't encode character ...`：
+    #   * 轻则某几行日志变成 traceback（用户在 `python main.py` 下看到的就是这个）
+    #   * 重则 uvicorn 启动阶段直接崩
+    #
+    # - PYTHONUTF8=1        ：Python 3.7+ 的 UTF-8 模式，stdout/stderr 全走 UTF-8
+    # - PYTHONIOENCODING    ：兜底（部分场景 UTF-8 模式不一定覆盖，比如被别的
+    #                          启动器重新 exec 时）
+    #
+    # 注意：这同时也让「子进程输出」与「父进程读取时指定的 encoding='utf-8'」
+    # 两边一致 —— 两端都钉死 UTF-8，才不会有「生产者写 A、消费者按 B 解」的错配。
+    child_env = dict(os.environ)
+    child_env["PYTHONUTF8"] = "1"
+    child_env["PYTHONIOENCODING"] = "utf-8"
+
     def _launch(tag: str, cmd: list[str], port: int, host: str, logfile: Path) -> None:
         _log(f"[main] 启动 {tag} (http://{host}:{port}) : {' '.join(cmd)}")
         # 交互式终端才用「管道 + 转发线程」以便边跑边看；
@@ -794,7 +843,16 @@ def main() -> None:
                 cmd, cwd=str(ROOT),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 start_new_session=True,
-                text=True, bufsize=1, env=os.environ.copy(),
+                # **必须显式指定 encoding + errors**：
+                # 不指定时 text=True 用系统默认编码（中文 Windows = GBK），
+                # 而 uvicorn 输出是 UTF-8 —— `stream.readline()` 会直接抛
+                # UnicodeDecodeError，**转发线程当场死掉**，管道再没人排空，
+                # 子进程随后卡死在 write 上（表现为「服务无响应」）。
+                # 实测踩过：`UnicodeDecodeError: 'gbk' codec can't decode byte 0x9a`。
+                # errors="replace" 是第二道保险：即使上游吐了非法字节，
+                # 也退化成替换字符，绝不因为「一行乱码」而中断读取。
+                text=True, encoding="utf-8", errors="replace",
+                bufsize=1, env=child_env,
             )
             threading.Thread(target=_pump, args=(p.stdout, logfile, tag),
                              daemon=True).start()
@@ -805,7 +863,10 @@ def main() -> None:
                 cmd, cwd=str(ROOT),
                 stdout=fh, stderr=subprocess.STDOUT,
                 start_new_session=True,
-                text=True, bufsize=1, env=os.environ.copy(),
+                # 同上：显式 UTF-8（这里是直接写文件，坑相对小，
+                # 但保持一致避免「交互/非交互行为不同」的诡异问题）
+                text=True, encoding="utf-8", errors="replace",
+                bufsize=1, env=child_env,
             )
         procs.append((tag, p))
 
