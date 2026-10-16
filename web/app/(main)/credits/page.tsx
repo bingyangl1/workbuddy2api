@@ -125,67 +125,69 @@ export default function CreditsPage() {
             {expiry.accounts.length === 0 ? (
               <EmptyState title={t('credits.noAccounts')} />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('credits.colAccount')}</TableHead>
-                    <TableHead className="text-right">{t('credits.colBalance')}</TableHead>
-                    <TableHead className="text-right">{t('credits.colExpiring')}</TableHead>
-                    <TableHead>{t('credits.colSoonest')}</TableHead>
-                    <TableHead>{t('credits.colNextPkgs')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {expiry.accounts.map((a) => {
-                    const urgent = a.expiring_soon_remaining > 0;
-                    return (
-                      <TableRow key={a.account_id}>
-                        <TableCell className="font-medium">
-                          {a.account_name}
-                          {a.status !== 'active' && (
-                            <Badge variant="outline" className="ml-1.5 text-[9px]">{a.status}</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">{fmtNumber(a.balance_remain)}</TableCell>
-                        <TableCell className="text-right">
-                          {urgent ? (
-                            <span className="font-medium text-red-500">{fmtNumber(a.expiring_soon_remaining)}</span>
-                          ) : <span className="text-muted-foreground">0</span>}
-                        </TableCell>
-                        <TableCell>
-                          {a.soonest_expire_at ? (
-                            <TooltipProvider delayDuration={200}>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Badge variant="outline" className={cn('text-[10px]',
-                                    (a.soonest_days_left ?? 99) <= 3 ? 'border-red-300 text-red-600'
-                                    : (a.soonest_days_left ?? 99) <= 7 ? 'border-amber-300 text-amber-600'
-                                    : 'border-sky-300 text-sky-600')}>
-                                    {a.soonest_label}
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="text-xs">{fmtDate(a.soonest_expire_at)}</TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          ) : <span className="text-xs text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="max-w-[220px]">
-                          <div className="flex flex-wrap gap-1">
-                            {a.next_expiring.slice(0, 2).map((p, i) => (
-                              <Badge key={i} variant="secondary" className="text-[9px]">
-                                {p.display_name}·{fmtNumber(Math.round(p.remaining))}
-                              </Badge>
-                            ))}
-                            {a.active_package_count > 2 && (
-                              <span className="text-[10px] text-muted-foreground">+{a.active_package_count - 2}</span>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('credits.colAccount')}</TableHead>
+                      <TableHead className="text-right">{t('credits.colBalance')}</TableHead>
+                      <TableHead className="text-right">{t('credits.colExpiring')}</TableHead>
+                      <TableHead>{t('credits.colSoonest')}</TableHead>
+                      <TableHead>{t('credits.colNextPkgs')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {expiry.accounts.map((a) => {
+                      const urgent = a.expiring_soon_remaining > 0;
+                      return (
+                        <TableRow key={a.account_id}>
+                          <TableCell className="font-medium">
+                            {a.account_name}
+                            {a.status !== 'active' && (
+                              <Badge variant="outline" className="ml-1.5 text-[9px]">{a.status}</Badge>
                             )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                          </TableCell>
+                          <TableCell className="text-right">{fmtNumber(a.balance_remain)}</TableCell>
+                          <TableCell className="text-right">
+                            {urgent ? (
+                              <span className="font-medium text-red-500">{fmtNumber(a.expiring_soon_remaining)}</span>
+                            ) : <span className="text-muted-foreground">0</span>}
+                          </TableCell>
+                          <TableCell>
+                            {a.soonest_expire_at ? (
+                              <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge variant="outline" className={cn('text-[10px]',
+                                      (a.soonest_days_left ?? 99) <= 3 ? 'border-red-300 text-red-600'
+                                      : (a.soonest_days_left ?? 99) <= 7 ? 'border-amber-300 text-amber-600'
+                                      : 'border-sky-300 text-sky-600')}>
+                                      {a.soonest_label}
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="text-xs">{fmtDate(a.soonest_expire_at)}</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="max-w-[220px]">
+                            <div className="flex flex-wrap gap-1">
+                              {a.next_expiring.slice(0, 2).map((p, i) => (
+                                <Badge key={i} variant="secondary" className="text-[9px]">
+                                  {p.display_name}·{fmtNumber(Math.round(p.remaining))}
+                                </Badge>
+                              ))}
+                              {a.active_package_count > 2 && (
+                                <span className="text-[10px] text-muted-foreground">+{a.active_package_count - 2}</span>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </section>
         </TabsContent>
@@ -214,34 +216,36 @@ export default function CreditsPage() {
               {usage.accounts.length === 0 ? (
                 <EmptyState title={t('credits.noUsage')} />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('credits.colAccount')}</TableHead>
-                      <TableHead className="text-right">{t('credits.colBurned')}</TableHead>
-                      <TableHead className="text-right">{t('credits.colRemain')}</TableHead>
-                      <TableHead>{t('credits.colShare')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {usage.accounts.map((a) => {
-                      const share = usage.total_credits > 0 ? (a.credits / usage.total_credits) * 100 : 0;
-                      return (
-                        <TableRow key={a.account_id}>
-                          <TableCell className="text-xs font-medium">{a.account_name}</TableCell>
-                          <TableCell className="text-right text-xs">{a.credits.toFixed(1)}</TableCell>
-                          <TableCell className="text-right text-xs">{fmtNumber(a.remaining)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1.5">
-                              <Progress value={share} className="h-1.5 w-16" />
-                              <span className="text-[10px] text-muted-foreground">{share.toFixed(0)}%</span>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('credits.colAccount')}</TableHead>
+                        <TableHead className="text-right">{t('credits.colBurned')}</TableHead>
+                        <TableHead className="text-right">{t('credits.colRemain')}</TableHead>
+                        <TableHead>{t('credits.colShare')}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {usage.accounts.map((a) => {
+                        const share = usage.total_credits > 0 ? (a.credits / usage.total_credits) * 100 : 0;
+                        return (
+                          <TableRow key={a.account_id}>
+                            <TableCell className="text-xs font-medium">{a.account_name}</TableCell>
+                            <TableCell className="text-right text-xs">{a.credits.toFixed(1)}</TableCell>
+                            <TableCell className="text-right text-xs">{fmtNumber(a.remaining)}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5">
+                                <Progress value={share} className="h-1.5 w-16" />
+                                <span className="text-[10px] text-muted-foreground">{share.toFixed(0)}%</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </section>
 
@@ -251,24 +255,26 @@ export default function CreditsPage() {
               {usage.models.length === 0 ? (
                 <EmptyState title={t('credits.noUsage')} />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('credits.colModel')}</TableHead>
-                      <TableHead className="text-right">{t('credits.colRequests')}</TableHead>
-                      <TableHead className="text-right">{t('credits.colBurned')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {usage.models.map((m) => (
-                      <TableRow key={m.model}>
-                        <TableCell className="font-mono text-[11px]">{m.model}</TableCell>
-                        <TableCell className="text-right text-xs">{fmtNumber(m.requests)}</TableCell>
-                        <TableCell className="text-right text-xs">{m.credits.toFixed(1)}</TableCell>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('credits.colModel')}</TableHead>
+                        <TableHead className="text-right">{t('credits.colRequests')}</TableHead>
+                        <TableHead className="text-right">{t('credits.colBurned')}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {usage.models.map((m) => (
+                        <TableRow key={m.model}>
+                          <TableCell className="font-mono text-[11px]">{m.model}</TableCell>
+                          <TableCell className="text-right text-xs">{fmtNumber(m.requests)}</TableCell>
+                          <TableCell className="text-right text-xs">{m.credits.toFixed(1)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </section>
           </div>

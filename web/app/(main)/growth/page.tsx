@@ -163,8 +163,8 @@ export default function GrowthPage() {
           {tasks.length === 0 ? (
             <EmptyState title={t('growth.noTasks')} />
           ) : (
-            <div className="max-h-[480px] overflow-y-auto">
-              <Table>
+            <div className="max-h-[480px] overflow-y-auto overflow-x-auto">
+          <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('growth.colTask')}</TableHead>
@@ -311,8 +311,8 @@ function AccountTasksDialog({accountId, onClose, onChanged}: {
                 </Button>
               </div>
             </div>
-            <div className="max-h-[50vh] overflow-y-auto rounded-md border">
-              <Table>
+            <div className="max-h-[50vh] overflow-y-auto rounded-md border overflow-x-auto">
+          <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('growth.colTask')}</TableHead>

@@ -43,6 +43,7 @@
  * 得到。少了这一条，「设置 用户」这种再自然不过的组合会一条都搜不出来——「用户」
  * 在名字里，「设置」只在右侧那个归属提示里。
  */
+import {NAV_GROUPS, allNavItems} from '@/lib/app-nav';
 
 /**
  * 检索的输入单位。
@@ -78,57 +79,58 @@ export type NavSeed = {
  * ⚠️ 这是一份**带守卫的副本**：`server/tests/test_command_palette.py` 会拿它与
  * 底栏 / `section-nav` / `settings-tabs` 三处逐条比对。加页面时三处都要改。
  */
-export const NAV_COMMANDS: readonly NavSeed[] = [
-  {href: '/dashboard', labelKey: 'nav.dashboard', groupKey: 'nav.groupOverview',
-   keywords: 'dashboard home 总览 首页 仪表盘'},
-  {href: '/accounts', labelKey: 'nav.accounts', groupKey: 'nav.groupOps',
-   keywords: 'accounts account pool 账号 号池'},
-  // 被吸收进「账号」的那一页，紧跟它所属的一节
-  {href: '/tasks', labelKey: 'nav.tasks', groupKey: 'nav.accounts',
-   keywords: 'tasks task checkin 任务 签到 记录'},
-  {href: '/keys', labelKey: 'nav.keys', groupKey: 'nav.groupOps',
-   keywords: 'keys key api 密钥'},
-  {href: '/red-packets', labelKey: 'nav.redPackets', groupKey: 'nav.keys',
-   keywords: 'red packets redpackets quota 红包 额度'},
-  {href: '/models', labelKey: 'nav.models', groupKey: 'nav.groupOps',
-   keywords: 'models model price 模型 价格'},
-  {href: '/models/catalog', labelKey: 'nav.catalog', groupKey: 'nav.models',
-   keywords: 'catalog model 模型中心 目录 档位'},
-  {href: '/playground', labelKey: 'nav.playground', groupKey: 'nav.models',
-   keywords: 'playground chat 测试台 聊天'},
-  {href: '/stats', labelKey: 'nav.stats', groupKey: 'nav.groupGovernance',
-   keywords: 'stats statistics usage 统计 用量'},
-  {href: '/logs', labelKey: 'nav.logs', groupKey: 'nav.groupGovernance',
-   keywords: 'logs log 日志'},
-  {href: '/security', labelKey: 'nav.security', groupKey: 'nav.groupGovernance',
-   keywords: 'security ip allow deny 安全 白名单'},
-  {href: '/settings', labelKey: 'nav.settings', groupKey: 'nav.groupGovernance',
-   keywords: 'settings config 设置 配置'},
-  {href: '/settings/upstream', labelKey: 'settings.tabUpstream', groupKey: 'nav.settings',
-   keywords: 'upstream upstash 上游 配置'},
-  {href: '/settings/proxy', labelKey: 'settings.tabProxy', groupKey: 'nav.settings',
-   keywords: 'proxy route socks5 egress 代理 线路 出口'},
-  {href: '/settings/models', labelKey: 'settings.tabModels', groupKey: 'nav.settings',
-   keywords: 'model map alias 模型 映射 别名'},
-  {href: '/settings/users', labelKey: 'settings.tabUsers', groupKey: 'nav.settings',
-   keywords: 'users user member 用户 成员'},
-  {href: '/settings/tokens', labelKey: 'settings.tabTokens', groupKey: 'nav.settings',
-   keywords: 'tokens token api 令牌'},
-  {href: '/settings/system', labelKey: 'settings.tabSystem', groupKey: 'nav.settings',
-   keywords: 'system update upgrade 系统 更新 版本'},
-  {href: '/backup', labelKey: 'nav.backup', groupKey: 'nav.groupGovernance',
-   keywords: 'backup snapshot restore 备份 恢复 快照 数据'},
-  {href: '/settings/sync', labelKey: 'sync.title', groupKey: 'nav.settings',
-   keywords: 'sync remote push hmac 同步 线上 推送'},
-  {href: '/settings/password', labelKey: 'password.title', groupKey: 'nav.settings',
-   keywords: 'password change 密码 修改 安全'},
-  {href: '/settings/app-source', labelKey: 'appSource.title', groupKey: 'nav.settings',
-   keywords: 'app-source asar unpack decompile 逆向 产物 拆包 源码'},
-  {href: '/changelog', labelKey: 'nav.changelog', groupKey: 'nav.groupGovernance',
-   keywords: 'changelog release notes 更新日志 版本'},
-  {href: '/settings/about', labelKey: 'settings.tabAbout', groupKey: 'nav.settings',
-   keywords: 'about version 关于 版本'},
-];
+/**
+ * 面板里的全部页面 —— **从 `lib/app-nav.ts` 派生**，不在这里再抄一份。
+ *
+ * 为什么改成派生（历史教训）：这里原本是手抄的清单，抄自 manager 的骨架，
+ * 带着 9 条本引擎**不存在**的页面（`/tasks`、`/red-packets`、
+ * `/settings/upstream|proxy|models|users|tokens|system|about`）。
+ * 逐页 parity 时只验了「直接访问 URL」，没人从菜单点一遍，所以一直没暴露 ——
+ * 一旦接上 ⌘K 搜索，用户搜到「上游配置」点进去就是 404。
+ *
+ * 现在侧边栏、⌘K、页内 Tab 都取自 `app-nav.ts`：
+ * **加页面只改那里的一行**，不会再漂移。
+ */
+export const NAV_COMMANDS: readonly NavSeed[] = allNavItems().map((item) => ({
+  href: item.href,
+  labelKey: item.labelKey,
+  // 归属提示用侧边栏的分组名（⌘K 结果右侧显示「运营 / 数据 / 治理 …」）
+  groupKey: groupLabelKeyOf(item.href),
+  keywords: NAV_KEYWORDS[item.href] ?? item.href,
+}));
+
+/** href → 搜索关键词（含中文与拼音缩写，便于中英混搜）。 */
+const NAV_KEYWORDS: Record<string, string> = {
+  '/dashboard': 'dashboard home overview 总览 首页 仪表盘',
+  '/accounts': 'accounts account pool 账号 号池 账号池',
+  '/keys': 'keys key api 密钥 sk',
+  '/tokens': 'tokens token readonly wbt 令牌 只读',
+  '/models': 'models model price whitelist 模型 白名单 倍率',
+  '/models/catalog': 'catalog model 模型中心 目录 档位 上下文',
+  '/playground': 'playground chat test 测试台 聊天 调试',
+  '/stats': 'stats statistics usage chart 统计 用量 图表',
+  '/logs': 'logs log request 日志 请求 记录',
+  '/credits': 'credits expiry balance 积分 到期 余额',
+  '/schedules': 'schedules cron task 定时 任务 调度',
+  '/growth': 'growth plan checkin 成长 计划 签到',
+  '/security': 'security ip allow deny alias 安全 管控 白名单 别名',
+  '/audit': 'audit trail 审计 操作 追溯',
+  '/account-groups': 'groups pool isolation 分组 账号池 隔离',
+  '/settings': 'settings config profile ua 设置 配置 参数 伪装',
+  '/settings/sync': 'sync remote push hmac 同步 线上 推送',
+  '/settings/password': 'password change 密码 修改 安全',
+  '/settings/app-source': 'app-source asar unpack decompile 逆向 产物 拆包 源码',
+  '/backup': 'backup snapshot restore 备份 恢复 快照 数据',
+  '/changelog': 'changelog release notes 更新日志 版本',
+};
+
+/** 反查某 href 属于哪个分组（拿它的 labelKey）。 */
+function groupLabelKeyOf(href: string): string {
+  for (const g of NAV_GROUPS) {
+    if (g.items.some((i) => i.href === href)) return g.labelKey;
+  }
+  return 'nav.groupGovernance';
+}
 
 /**
  * 把导航种子翻成可检索的条目。

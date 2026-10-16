@@ -82,13 +82,16 @@ export type SectionKey = (typeof SECTIONS)[number];
  * `server/tests/test_section_nav.py` 都依赖这条约定，别把顺序改了。
  */
 export const SECTION_NAV: Record<SectionKey, readonly SectionNavItem[]> = {
+  // 账号节原本还有 `/tasks`（账号池的「任务记录」）—— 那是 manager 的页面，
+  // 本引擎把签到/成长记录并入了「成长计划」页，`/tasks` 并不存在（点进去 404）。
+  // 逐页 parity 时只验了「直接访问 URL」，没人从菜单点一遍，所以一直留到了现在。
   accounts: [
     {key: 'accounts', href: '/accounts', labelKey: 'nav.accounts', iconKey: 'accounts'},
-    {key: 'tasks', href: '/tasks', labelKey: 'nav.tasks', iconKey: 'tasks'},
   ],
+  // 密钥节原本还有 `/red-packets`（红包裂变）—— 本引擎**未实现**该功能
+  // （PLAN 里是 P6 可选增强），页面不存在，已移除以免导航指向 404。
   keys: [
     {key: 'keys', href: '/keys', labelKey: 'nav.keys', iconKey: 'keys'},
-    {key: 'redPackets', href: '/red-packets', labelKey: 'nav.redPackets', iconKey: 'redPackets'},
   ],
   models: [
     {key: 'models', href: '/models', labelKey: 'nav.models', iconKey: 'models'},

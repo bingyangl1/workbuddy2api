@@ -141,7 +141,7 @@ export default function SchedulesPage() {
       {items.length === 0 ? (
         <EmptyState title={t('schedules.empty')} />
       ) : (
-        <div className="rounded-xl border bg-card">
+        <div className="rounded-xl border bg-card overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

@@ -199,8 +199,8 @@ export default function SecurityPage() {
           {rules.length === 0 ? (
             <EmptyState title={t('security.noRules')} />
           ) : (
-            <div className="rounded-xl border bg-card">
-              <Table>
+            <div className="rounded-xl border bg-card overflow-x-auto">
+          <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('security.colKind')}</TableHead>
@@ -246,8 +246,8 @@ export default function SecurityPage() {
           {logs.length === 0 ? (
             <EmptyState title={t('security.noLogs')} />
           ) : (
-            <div className="rounded-xl border bg-card">
-              <Table>
+            <div className="rounded-xl border bg-card overflow-x-auto">
+          <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('security.colTime')}</TableHead>
@@ -301,8 +301,8 @@ export default function SecurityPage() {
           {Object.keys(modelMap).length === 0 ? (
             <EmptyState title={t('security.noMap')} />
           ) : (
-            <div className="rounded-xl border bg-card">
-              <Table>
+            <div className="rounded-xl border bg-card overflow-x-auto">
+          <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('security.colAlias')}</TableHead>

@@ -111,7 +111,7 @@ export default function AuditPage() {
       ) : items.length === 0 ? (
         <EmptyState title={t('audit.empty')} />
       ) : (
-        <div className="rounded-xl border bg-card">
+        <div className="rounded-xl border bg-card overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

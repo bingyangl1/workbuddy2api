@@ -164,8 +164,8 @@ export default function ModelsPage() {
           {filtered.length === 0 ? (
             <EmptyState title={t('models.empty')} />
           ) : (
-            <div className="rounded-xl border bg-card">
-              <Table>
+            <div className="rounded-xl border bg-card overflow-x-auto">
+          <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-8" />

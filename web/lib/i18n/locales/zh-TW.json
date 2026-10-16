@@ -57,7 +57,19 @@
     "redPackets": "紅包",
     "catalog": "模型中心",
     "changelog": "更新日誌",
-    "backup": "資料備份"
+    "backup": "資料備份",
+    "groupData": "資料",
+    "groupAutomation": "自動化",
+    "groupSystem": "系統",
+    "mainNav": "主導覽",
+    "openMenu": "開啟選單",
+    "closeMenu": "關閉選單",
+    "tokens": "存取權杖",
+    "credits": "積分",
+    "schedules": "定時任務",
+    "growth": "成長計畫",
+    "audit": "操作稽核",
+    "accountGroups": "帳號分組"
   },
   "login": {
     "subtitle": "騰訊 CodeBuddy 帳號池管理 · OpenAI 相容反向代理閘道",

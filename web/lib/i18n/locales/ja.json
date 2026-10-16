@@ -57,7 +57,19 @@
     "redPackets": "紅包",
     "catalog": "モデル一覧",
     "changelog": "変更履歴",
-    "backup": "バックアップ"
+    "backup": "バックアップ",
+    "groupData": "データ",
+    "groupAutomation": "自動化",
+    "groupSystem": "システム",
+    "mainNav": "メインナビゲーション",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる",
+    "tokens": "アクセストークン",
+    "credits": "クレジット",
+    "schedules": "スケジュール",
+    "growth": "成長プラン",
+    "audit": "操作監査",
+    "accountGroups": "アカウントグループ"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy アカウントプール管理 · OpenAI 互換リバースプロキシゲートウェイ",

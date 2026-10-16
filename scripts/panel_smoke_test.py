@@ -251,16 +251,25 @@ interact("/dashboard/", "模型健康表有行",
 interact("/playground/", "模型下拉已填充",
          "(document.body.innerText.includes('免费') || !!document.querySelector('button[aria-label]')) ? 'ok' : 'empty'", 2.5)
 
-# ── 移动端逐页溢出检查（19 页）──
+# ── 移动端逐页溢出检查 ──
 print("\n=== 移动端 375px 逐页横向溢出 ===")
 rpc("Emulation.setDeviceMetricsOverride", {"width": 375, "height": 812, "deviceScaleFactor": 2, "mobile": True})
 mob = []
 for path, label in PAGES:
     goto(path, 2.0)
-    ov = js("document.documentElement.scrollWidth > 375")
+    # **正确判据**：`scrollWidth > clientWidth`（内容比视口宽），而不是
+    # `scrollWidth > 375`（硬编码）。
+    #
+    # 为什么不能用硬编码 375：`mobile=True` 的模拟下，Chrome 会按页面的
+    # `viewport meta` 决定布局宽度 —— 没有 meta 的页面（如 about:blank）会拿到
+    # 默认 980，此时读到的 scrollWidth（如 389）与 375 比较就是假阳性
+    # （实测踩过：侧边栏接入后 21 页全部「溢出 389」，实际一页都没溢出）。
+    # 用 clientWidth 作基准则与页面自身声明的布局宽度一致，跨页面可比。
+    ov = js("document.documentElement.scrollWidth > document.documentElement.clientWidth")
     sw = js("document.documentElement.scrollWidth")
-    mob.append({"path": path, "overflow": bool(ov), "scrollW": sw})
-    print(f"[{'FAIL' if ov else 'PASS'}] {path:22s} scrollW={sw}")
+    cw = js("document.documentElement.clientWidth")
+    mob.append({"path": path, "overflow": bool(ov), "scrollW": sw, "clientW": cw})
+    print(f"[{'FAIL' if ov else 'PASS'}] {path:22s} scrollW={sw} clientW={cw}")
 rpc("Emulation.clearDeviceMetricsOverride")
 
 # ── 汇总 ──

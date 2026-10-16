@@ -57,7 +57,19 @@
     "redPackets": "빨간 봉투",
     "catalog": "모델 카탈로그",
     "changelog": "변경 로그",
-    "backup": "백업"
+    "backup": "백업",
+    "groupData": "데이터",
+    "groupAutomation": "자동화",
+    "groupSystem": "시스템",
+    "mainNav": "기본 탐색",
+    "openMenu": "메뉴 열기",
+    "closeMenu": "메뉴 닫기",
+    "tokens": "액세스 토큰",
+    "credits": "크레딧",
+    "schedules": "스케줄",
+    "growth": "성장 플랜",
+    "audit": "감사 로그",
+    "accountGroups": "계정 그룹"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy 계정 풀 관리 · OpenAI 호환 리버스 프록시 게이트웨이",

@@ -276,7 +276,7 @@ export default function AccountsPage() {
       {filtered.length === 0 ? (
         <EmptyState title={t('accounts.empty')} />
       ) : (
-        <div className="rounded-xl border bg-card">
+        <div className="rounded-xl border bg-card overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -560,7 +560,7 @@ function CreditDetailsDialog({account, onClose}: {
         ) : resources.length === 0 ? (
           <EmptyState title={t('accounts.creditEmpty')} />
         ) : (
-          <div className="max-h-[50vh] overflow-y-auto">
+          <div className="max-h-[50vh] overflow-x-auto overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -673,7 +673,7 @@ function ImportLocalDialog({open, onClose, onDone}: {
             <p className="text-xs text-muted-foreground">
               {t('accounts.importDir', {dir: data.dir, n: data.items.length})}
             </p>
-            <div className="max-h-[46vh] overflow-y-auto rounded-md border">
+            <div className="max-h-[46vh] overflow-x-auto overflow-y-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -828,7 +828,7 @@ function ToolsDialog({open, onClose, onChanged}: {
             ) : limits.length === 0 ? (
               <p className="py-2 text-xs text-muted-foreground">{t('accounts.limitsEmpty')}</p>
             ) : (
-              <div className="max-h-[32vh] overflow-y-auto">
+              <div className="max-h-[32vh] overflow-x-auto overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>

@@ -57,7 +57,19 @@
     "redPackets": "红包",
     "catalog": "模型中心",
     "changelog": "更新日志",
-    "backup": "数据备份"
+    "backup": "数据备份",
+    "groupData": "数据",
+    "groupAutomation": "自动化",
+    "groupSystem": "系统",
+    "mainNav": "主导航",
+    "openMenu": "打开菜单",
+    "closeMenu": "关闭菜单",
+    "tokens": "访问令牌",
+    "credits": "积分",
+    "schedules": "定时任务",
+    "growth": "成长计划",
+    "audit": "操作审计",
+    "accountGroups": "账号分组"
   },
   "login": {
     "subtitle": "腾讯 CodeBuddy 账号池管理 · OpenAI 兼容反代网关",

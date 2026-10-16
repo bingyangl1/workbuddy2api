@@ -103,7 +103,7 @@ export default function TokensPage() {
       {items.length === 0 ? (
         <EmptyState title={t('tokens.empty')} />
       ) : (
-        <div className="rounded-xl border bg-card">
+        <div className="rounded-xl border bg-card overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

@@ -57,7 +57,19 @@
     "redPackets": "Red packets",
     "catalog": "Catalog",
     "changelog": "Changelog",
-    "backup": "Backup"
+    "backup": "Backup",
+    "groupData": "Data",
+    "groupAutomation": "Automation",
+    "groupSystem": "System",
+    "mainNav": "Main navigation",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "tokens": "Access tokens",
+    "credits": "Credits",
+    "schedules": "Schedules",
+    "growth": "Growth",
+    "audit": "Audit log",
+    "accountGroups": "Account groups"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy account pool console · OpenAI-compatible gateway",
