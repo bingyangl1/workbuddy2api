@@ -23,9 +23,15 @@
 .PARAMETER NextPanel
   让 / 和 /admin 也指向新面板（等价 ADMIN_DEFAULT_PANEL=next）。
 
+.PARAMETER Docs
+  打开 `/docs`（OpenAPI 接口文档）。**默认关闭** —— 与生产口径一致
+  （`config.py` 里 `ADMIN_ENABLE_DOCS` 默认 0）。接口文档会暴露全部路由与
+  请求结构，非测试环境不该默认开着。
+
 .EXAMPLE
-  .\dev.ps1                 # 启动（带上游只读护栏）
+  .\dev.ps1                 # 启动（带上游只读护栏；/docs 关闭）
   .\dev.ps1 -Check          # 只自检
+  .\dev.ps1 -Docs           # 启动并打开接口文档
   .\dev.ps1 -Live           # 启动并允许真实触达上游
   .\dev.ps1 -NextPanel      # 启动且默认进新面板
 
@@ -38,7 +44,8 @@
 param(
     [switch]$Live,
     [switch]$Check,
-    [switch]$NextPanel
+    [switch]$NextPanel,
+    [switch]$Docs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,7 +65,10 @@ $DevConfig = [ordered]@{
     ADMIN_PANEL_STATIC   = '1'
     ADMIN_PANEL_PATH     = '/panel'
     # 开发便利
-    ADMIN_ENABLE_DOCS    = '1'
+    # 注意：`/docs`（OpenAPI 文档）**默认关闭**，与生产口径一致
+    # （config.py: ENABLE_DOCS = os.getenv("ADMIN_ENABLE_DOCS","0") == "1"）。
+    # 要看接口文档时显式加 `-Docs` 参数，不要在默认路径上打开它。
+    ADMIN_ENABLE_DOCS    = '0'
     ADMIN_DEV_TOOLS      = '1'
     ADMIN_BACKUP_DIR     = (Join-Path $PSScriptRoot '_bkptest')
     # 安全护栏：默认开启（测试时绝不打上游写操作）
@@ -66,6 +76,8 @@ $DevConfig = [ordered]@{
 }
 if ($NextPanel) { $DevConfig['ADMIN_DEFAULT_PANEL'] = 'next' }
 if ($Live)      { $DevConfig['ADMIN_UPSTREAM_READONLY'] = '0' }
+# `/docs` 必须**显式**打开（用户要求：非测试环境默认关闭）
+if ($Docs)      { $DevConfig['ADMIN_ENABLE_DOCS'] = '1' }
 
 $port = $DevConfig['ADMIN_PORT']
 
@@ -183,6 +195,8 @@ Write-Host "  旧面板    http://127.0.0.1:$port/admin-legacy/" -ForegroundColo
 Write-Host "  注册页    http://127.0.0.1:$port/join" -ForegroundColor White
 if ($DevConfig['ADMIN_ENABLE_DOCS'] -eq '1') {
     Write-Host "  接口文档  http://127.0.0.1:$port/docs" -ForegroundColor White
+} else {
+    Write-Host "  接口文档  已关闭（要用加 -Docs 参数）" -ForegroundColor DarkGray
 }
 Write-Host "  登录      $($DevConfig['ADMIN_USERNAME']) / $($DevConfig['ADMIN_PASSWORD'])" -ForegroundColor White
 $ro = $DevConfig['ADMIN_UPSTREAM_READONLY']

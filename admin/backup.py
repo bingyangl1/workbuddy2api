@@ -142,6 +142,56 @@ def _q(db: Session, name: str) -> str:
     return db.get_bind().dialect.identifier_preparer.quote(name)
 
 
+#: 脱敏占位符（与 `_REDACT` 表里的值一致）。快照里出现这些字面量 = 已被脱敏。
+_REDACT_MARKERS: tuple[str, ...] = (
+    "[redacted]", "[redacted-token]", "[redacted-hash]", "[redacted-key]",
+    "[redacted-ip]",
+)
+
+
+def _find_redacted(tables: dict) -> str:
+    """扫描快照，找有没有脱敏占位符。返回命中的占位符（空串=没命中）。
+
+    为什么要逐值扫而不是只信 `include_secrets` 字段：那个字段是**导出的自述**，
+    一份被外部编辑过、或由更早版本导出的文件可能不带它/写错它。
+    实际值才是最硬的判据。
+    """
+    for _table, rows in tables.items():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for _col, val in row.items():
+                if isinstance(val, str) and val.strip() in _REDACT_MARKERS:
+                    return val.strip()
+    return ""
+
+
+def _find_broken_auth(tables: dict) -> int:
+    """统计快照里 auth_json 非法 JSON 的账号数（凭证结构已损坏）。
+
+    只检查 accounts 表、且只对「非空字符串」判定：空值可能是正常的未完成导入，
+    不是我们要拦的对象（那种情况下用「非 JSON」拦会误伤）。
+    """
+    broken = 0
+    for row in (tables.get("accounts") or []):
+        if not isinstance(row, dict):
+            continue
+        aj = row.get("auth_json")
+        if not isinstance(aj, str) or not aj.strip():
+            continue
+        try:
+            obj = json.loads(aj)
+        except Exception:
+            broken += 1
+            continue
+        # 合法 JSON 但结构不对（不是对象 / 没有 auth 段）也算坏：上游调用必然失败
+        if not isinstance(obj, dict) or not isinstance(obj.get("auth"), dict):
+            broken += 1
+    return broken
+
+
 def export_snapshot(db: Session, *, include_secrets: bool = True) -> dict:
     """导出全库快照（dict，可直接 json.dumps）。
 
@@ -172,13 +222,17 @@ def snapshot_stats(payload: dict) -> dict:
     return {t: len(rows) for t, rows in (payload.get("tables") or {}).items()}
 
 
-def restore_snapshot(db: Session, payload: dict, *, allow_partial: bool = False) -> dict:
+def restore_snapshot(db: Session, payload: dict, *, allow_partial: bool = False,
+                     allow_redacted: bool = False) -> dict:
     """把快照导入当前库（逐表 DELETE + INSERT，单事务）。
 
     失败整体回滚（不留半份数据）。返回 {restored: {table: n}, skipped: [...]}。
 
     为什么单事务：本功能最常见的误操作是「导错文件」；半份数据比全不导更糟——
     账号在新、密钥在旧，症状是随机 401，排查成本极高。
+
+    `allow_redacted`：默认 False = **拒绝**含脱敏占位符的快照（见下方事故说明）。
+    只在「确实要用脱敏数据做结构演示」时显式打开，正常恢复绝不该开。
     """
     fmt = payload.get("format")
     if fmt != SNAPSHOT_FORMAT:
@@ -186,6 +240,37 @@ def restore_snapshot(db: Session, payload: dict, *, allow_partial: bool = False)
     tables = payload.get("tables")
     if not isinstance(tables, dict):
         raise ValueError("快照缺少 tables 字段")
+
+    # ── 拒绝把「脱敏快照」恢复进库（真实事故防线）──────────────────────────
+    #
+    # 事故经过（2026-10-16 实测）：导出了一份**脱敏**快照（include_secrets=False）
+    # 又把它恢复了回去，于是 9 个国内版账号的 auth_json 变成字面量 "[redacted]"。
+    # 症状极隐蔽：服务照常启动、页面照常打开，**只有所有上游调用开始失败**
+    # （模型同步 502 / 余额刷新 502），因为凭证已经不在了。
+    #
+    # 三道校验，任一条命中就拒绝恢复：
+    #   1. 快照自报 include_secrets=False → 直接拒
+    #   2. 敏感列的值等于占位符字面量 → 拒（防「自报 True 但内容被脱敏」）
+    #   3. 账号 auth_json 不是合法 JSON → 拒（凭证结构已被破坏）
+    if not allow_redacted:
+        if payload.get("include_secrets") is False:
+            raise ValueError(
+                "拒绝恢复：这份快照是**脱敏**导出的（include_secrets=False）。"
+                "恢复它会把账号凭据/密钥替换成占位符，导致所有上游调用失败。"
+                "请改用未脱敏的快照（导出时勾选「含密」）。"
+            )
+        hit = _find_redacted(tables)
+        if hit:
+            raise ValueError(
+                f"拒绝恢复：快照里含脱敏占位符 {hit}（敏感列已被替换）。"
+                "恢复它会让账号/密钥失效。请使用含真实凭据的快照。"
+            )
+        broken = _find_broken_auth(tables)
+        if broken:
+            raise ValueError(
+                f"拒绝恢复：快照里有 {broken} 个账号的 auth_json 不是合法 JSON"
+                "（凭证结构已损坏）。恢复后这些账号无法调用上游。"
+            )
 
     insp = sa_inspect(db.get_bind())
     existing = set(insp.get_table_names())

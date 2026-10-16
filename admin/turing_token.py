@@ -118,6 +118,14 @@ def get_device_token(force: bool = False) -> str | None:
         out = subprocess.run(
             [node, str(_HELPER)],
             capture_output=True, text=True, timeout=_RUN_TIMEOUT, env=env,
+            # **必须显式 UTF-8**：不指定时 text=True 用系统默认编码（中文 Windows =
+            # GBK），而 helper 的 JSON 输出里可能含非 GBK 字节 → 内部的
+            # `_readerthread` 抛 UnicodeDecodeError → 这个 `subprocess.run`
+            # 整体抛异常 → 被下面的 `except: return None` 吞掉 →
+            # **风控设备 Token 静默拿不到**（症状是上游把请求当非官方客户端）。
+            # errors="replace" 是第二道保险：宁可 token 里有个替换字符被上层
+            # 判定失败，也不要让整个调用崩掉。
+            encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except Exception:
@@ -133,6 +141,16 @@ def get_device_token(force: bool = False) -> str | None:
         data = json.loads(out.stdout)
         token = (data.get("token") or "").strip() or None
     except Exception:
+        # stdout 解不出来时，把 stderr 带上再试一次：helper 崩溃时真正的
+        # 原因在 stderr，而 JSON 解析错误会把那条信息彻底埋掉（排查过）。
+        try:
+            err = (out.stderr or "").strip()[:200]
+            if err:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "turing helper 输出非 JSON（rc=%s）：stderr=%s", out.returncode, err)
+        except Exception:
+            pass
         token = None
 
     if not token:
