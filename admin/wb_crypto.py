@@ -248,3 +248,140 @@ def decrypt_info_file(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     return result
+
+
+# ── 运行时现取密钥（无需预先提取）─────────────────────────────────────────
+#
+# ## 为什么需要这条路
+#
+# `extract_at_rest_secret_key()` 用 `--require` 注入 hook 拉起客户端进程。
+# 它**能用**，但有三个缺点：
+#
+#   1. 会**短暂启动完整客户端**（可能弹窗/抢焦点/写用户数据目录）
+#   2. 产物需要落到磁盘（`_atrest_secret.json`）、需要人工搬运
+#   3. 对**别的用户**而言，他们 clone 这个项目后手上**没有**这个文件 ——
+#      于是「新版客户端凭据是加密的」直接把导入功能卡死
+#
+# 客户端**自己**当然能算出这个密钥（它得用自己的密钥解密自己的数据）。
+# 所以正确做法是：需要时**当场向客户端要**，用完即弃，不落盘、不依赖任何
+# 预先准备。`ELECTRON_RUN_AS_NODE=1` 让 Electron 以纯 Node 模式跑一段脚本
+# （不创建窗口、不初始化 GUI），正是为此设计的开关。
+#
+# 安全：密钥只在本进程内存里活着，**不写日志、不写磁盘**。
+# 日志里一旦出现它，等于凭据裸奔 —— 所以本模块从不打印密钥内容。
+
+#: 以「纯 Node 模式」向客户端索取密钥的脚本。
+#:
+#: 回传 **`atRestSecretKey` 原文**（不是派生后的 key）—— 因为调用方会把它
+#: 交给 `derive_protector_key()`，那里自己会做 sha256。若这里回传派生值，
+#: 会被再哈希一次，keyId 与信封里的对不上，解密必然失败。
+#:
+#: fail-closed：任何一步不满足就非零退出，绝不给半个结果。
+_NODE_SECRET_SCRIPT = r"""
+try {
+  const b = process._linkedBinding('electron_browser_workbuddy_storage');
+  const payload = JSON.parse(b.loggerGet());
+  if (!payload || payload.version !== 1) throw new Error('unexpected version');
+  const secret = payload.atRestSecretKey;
+  if (typeof secret !== 'string' || !secret) throw new Error('no secret');
+  // 必须是标准 base64 的 32 字节且非全零（占位/损坏值要挡掉）
+  const raw = Buffer.from(secret, 'base64');
+  if (raw.length !== 32 || raw.toString('base64') !== secret || raw.every(x => x === 0)) {
+    throw new Error('bad secret shape');
+  }
+  process.stdout.write(JSON.stringify({ atRestSecretKey: secret }));
+} catch (e) {
+  process.stderr.write(String((e && e.message) || e));
+  process.exitCode = 1;
+}
+"""
+
+
+def _candidate_client_exes(realm: str = "") -> list[str]:
+    """可能的客户端可执行文件（用 `wb_install` 的探测结果）。
+
+    探测失败不报错 —— 这条路本来就是「有就用、没有就走别的兜底」。
+    """
+    out: list[str] = []
+    try:
+        import wb_install
+    except Exception:
+        return out
+    realms = [realm] if realm in ("cn", "global") else ["cn", "global"]
+    for r in realms:
+        try:
+            d = wb_install.WB.install_dir(realm=r)
+        except Exception:
+            d = None
+        if not d:
+            continue
+        for name in ("WorkBuddy.exe", "WorkBuddyAI.exe", "workbuddy-ai.exe",
+                     "workbuddy.exe"):
+            p = os.path.join(str(d), name)
+            if os.path.isfile(p) and p not in out:
+                out.append(p)
+    return out
+
+
+def fetch_at_rest_secret_key(
+    exe_path: str | None = None,
+    *,
+    realm: str = "",
+    timeout_s: int = 20,
+) -> str | None:
+    """**当场**向已安装的客户端索取 at-rest 密钥（不落盘、无需预先提取）。
+
+    返回密钥字符串；不可用时返回 None（**不抛异常** —— 调用方按兜底链继续）。
+
+    与 `extract_at_rest_secret_key()` 的区别：
+
+    | | `extract_...` | `fetch_...`（本函数） |
+    |---|---|---|
+    | 启动方式 | `--require` 注入，**拉起完整客户端** | `ELECTRON_RUN_AS_NODE=1`，纯 Node |
+    | 是否可能弹窗 | 会（抢焦点） | 不会（不初始化 GUI） |
+    | 产物落盘 | 写 `_atrest_secret.json` | **不落盘**，只在内存 |
+    | 别的用户能否用 | ❌ 需预先提取好的文件 | ✅ 装了客户端就能用 |
+    """
+    import subprocess
+
+    exes: list[str] = []
+    if exe_path:
+        exes.append(exe_path)
+    exes += [p for p in _candidate_client_exes(realm) if p not in exes]
+
+    for exe in exes:
+        if not exe or not os.path.isfile(exe):
+            continue
+        env = dict(os.environ)
+        env["ELECTRON_RUN_AS_NODE"] = "1"
+        # NODE_OPTIONS 可能带 `--require` 之类，干扰我们的脚本
+        env.pop("NODE_OPTIONS", None)
+        try:
+            r = subprocess.run(
+                [exe, "-e", _NODE_SECRET_SCRIPT],
+                env=env, capture_output=True, timeout=timeout_s, check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            continue
+        if r.returncode != 0:
+            continue
+        raw = (r.stdout or b"").decode("utf-8", "replace").strip()
+        if not raw or len(raw) > 4096:
+            continue
+        try:
+            value = json.loads(raw)
+        except Exception:
+            continue
+        secret = value.get("atRestSecretKey") if isinstance(value, dict) else None
+        if not isinstance(secret, str) or not secret:
+            continue
+        # 自校验：必须能由它派生出 16 位小写 hex 的 keyId（防串改/错位）
+        try:
+            _key, key_id = derive_protector_key(secret)
+        except Exception:
+            continue
+        if len(key_id) != 16:
+            continue
+        return secret
+    return None

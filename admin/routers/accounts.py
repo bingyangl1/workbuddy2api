@@ -23,11 +23,34 @@ from admin.security import require_admin, require_admin_read
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 
-def _atrest_secret() -> str | None:
-    """取本机 at-rest 密钥：env 优先，其次仓库根的提取产物文件。"""
+def _atrest_secret(realm: str = "") -> str | None:
+    """取本机 at-rest 密钥，按**可用性从高到低**兜底。
+
+    顺序（每一步都「先无副作用、后有副作用」）：
+
+      1. `WORKBUDDY_ATREST_SECRET` 环境变量 —— 部署方显式指定，最可靠
+      2. **当场向已安装的客户端索取**（`wb_crypto.fetch_at_rest_secret_key`）
+         —— 不落盘、不弹窗、不需要任何预先准备；装了客户端就能用。
+         这一步是为「别的用户 clone 本项目后直接能用」准备的：他们手上没有
+         我们逆向提取的产物文件，缺了这一步功能就是死的。
+      3. 仓库根的历史产物文件（`_atrest_secret.json` / `_extracted_keys.json`）
+         —— 我们自己的开发机沿用、兼容既有部署，但不再作为**唯一**来源。
+
+    任一步失败继续往下走；全失败返回 None（调用方给出明确拒因）。
+    """
     secret = os.environ.get("WORKBUDDY_ATREST_SECRET", "").strip()
     if secret:
         return secret
+
+    # 2) 运行时现取（无副作用；失败静默跳下一步，不打扰用户）
+    try:
+        live = wb_crypto.fetch_at_rest_secret_key(realm=realm)
+        if live:
+            return live
+    except Exception:
+        pass
+
+    # 3) 历史产物文件（开发机沿用）
     here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     for name in ("_atrest_secret.json", "_extracted_keys.json"):
         p = os.path.join(here, name)
@@ -39,17 +62,20 @@ def _atrest_secret() -> str | None:
     return None
 
 
-def _decrypt_info_if_needed(data: dict) -> dict:
+def _decrypt_info_if_needed(data: dict, realm: str = "") -> dict:
     """新版客户端 .info 的敏感字段是 $wbEncrypted 信封；有密钥则解密。
 
     无密钥或解密失败时原样返回（后续 validate_credential 会给出明确拒因）。
+    `realm` 用于让「运行时现取密钥」走**对应版本**的客户端
+    （国内版 `WorkBuddy.exe` / 国际版 `WorkBuddyAI.exe`）。
     """
     try:
         if not wb_crypto.is_encrypted(
                 (data.get("auth") or {}).get("accessToken")):
             return data
-        secret = _atrest_secret()
+        secret = _atrest_secret(realm)
         if not secret:
+            # 没有密钥：原样返回（保持加密态），由 validate_credential 给出明确拒因
             return data
         protector, _ = wb_crypto.derive_protector_key(secret)
         return wb_crypto.decrypt_info_payload(data, protector)

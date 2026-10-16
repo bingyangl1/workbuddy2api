@@ -56,7 +56,11 @@ class TestImportLocalDecrypt(unittest.TestCase):
         mod = self._router_mod()
         tok = "aaa." + "b" * 20 + "." + "c" * 10
         encrypted = _make_encrypted_info(tok)
-        with mock.patch.dict(os.environ, {"WORKBUDDY_ATREST_SECRET": SECRET}):
+        # 必须同时屏蔽「运行时现取」：本机装了客户端时那条路会真取到密钥，
+        # 而那把密钥解不开本测试用 SECRET 造的假密文（测试之间要隔离）。
+        with mock.patch.dict(os.environ, {"WORKBUDDY_ATREST_SECRET": SECRET}), \
+             mock.patch.object(wb_crypto, "fetch_at_rest_secret_key",
+                               return_value=None):
             out = mod._decrypt_info_if_needed(encrypted)
         self.assertEqual(out["auth"]["accessToken"], tok)
         self.assertEqual(out["auth"]["refreshToken"], tok)
