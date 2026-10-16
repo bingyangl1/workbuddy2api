@@ -1667,7 +1667,13 @@
     "srcSaved": "Saved",
     "srcDetected": "Detected",
     "srcDefault": "Default",
-    "footHint": "Changes directly affect outbound spoofing and take effect on save (merge semantics — only submitted fields change)."
+    "footHint": "Changes directly affect outbound spoofing and take effect on save (merge semantics — only submitted fields change).",
+    "editingRealm": "Editing:",
+    "realmSwitchHint": "(switch realm at the top right; the two realms must be configured separately — mixing them is detectable upstream)",
+    "detected": "Local client detected",
+    "notDetected": "No local client",
+    "sourceSaved": "Pinned saved values",
+    "sourceAuto": "Prefer live detection"
   },
   "phrases": {
     "请求失败": "Request failed",
@@ -2054,7 +2060,12 @@
     "colRemain": "Remaining",
     "colShare": "Share",
     "colModel": "Model",
-    "colRequests": "Requests"
+    "colRequests": "Requests",
+    "scope": "Scope",
+    "scopeAll": "Both realms",
+    "scopeAccounts": "({n} accounts)",
+    "scopeAllBtn": "Show both realms",
+    "scopeOnlyThis": "Only current realm"
   },
   "tokens": {
     "title": "Access Tokens",

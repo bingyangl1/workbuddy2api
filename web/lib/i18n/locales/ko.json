@@ -1643,7 +1643,13 @@
     "srcSaved": "저장됨",
     "srcDetected": "감지됨",
     "srcDefault": "기본값",
-    "footHint": "변경은 아웃바운드 스푸핑에 직접 영향을 주며 저장 즉시 적용됩니다 (merge 의미 — 제출된 필드만 변경)."
+    "footHint": "변경은 아웃바운드 스푸핑에 직접 영향을 주며 저장 즉시 적용됩니다 (merge 의미 — 제출된 필드만 변경).",
+    "editingRealm": "편집 중:",
+    "realmSwitchHint": "(우측 상단에서 버전 전환; 두 버전의 파라미터는 각각 설정해야 합니다 — 혼용은 업스트림에서 감지됩니다)",
+    "detected": "로컬 클라이언트 감지됨",
+    "notDetected": "클라이언트 미감지",
+    "sourceSaved": "저장값 고정",
+    "sourceAuto": "실시간 감지 우선"
   },
   "phrases": {
     "请求失败": "요청 실패",
@@ -2030,7 +2036,12 @@
     "colRemain": "남음",
     "colShare": "비중",
     "colModel": "모델",
-    "colRequests": "요청 수"
+    "colRequests": "요청 수",
+    "scope": "집계 범위",
+    "scopeAll": "두 버전 합계",
+    "scopeAccounts": "({n}개 계정)",
+    "scopeAllBtn": "두 버전 합계 보기",
+    "scopeOnlyThis": "현재 버전만 보기"
   },
   "tokens": {
     "title": "액세스 토큰",

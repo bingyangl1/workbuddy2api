@@ -12,6 +12,8 @@
 import {useCallback, useEffect, useState} from 'react';
 import {clientProfileApi, errText} from '@/lib/api';
 import type {ClientProfile} from '@/lib/types';
+import {useRealm} from '@/lib/realm-context';
+import {cn} from '@/lib/utils';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {LoadError} from '@/components/common/states/LoadError';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
@@ -39,6 +41,18 @@ const SCALAR_FIELDS: {key: string; num?: boolean}[] = [
 
 export default function SettingsPage() {
   const t = useT();
+  /**
+   * 档案**按版本编辑**。
+   *
+   * 两版客户端身份本质不同（解包实测）：
+   *   cn     applicationName=WorkBuddy    channel=109144  ver=5.8.3
+   *   global applicationName=workbuddy-ai channel=400111  ver=5.8.4
+   *
+   * 编辑对象跟随右上角的版本切换；下方「两版一览」始终显示两版并排摘要，
+   * 这样用户不必来回切换就能发现「另一版还没配」（漏配会导致那一版的账号
+   * 带着错的客户端身份出站 —— 上游一比对就知道不是官方客户端）。
+   */
+  const {realm, label: realmLabel} = useRealm();
   const [data, setData] = useState<ClientProfile | null>(null);
   const [error, setError] = useState('');
   const [form, setForm] = useState<Record<string, string>>({});
@@ -49,7 +63,7 @@ export default function SettingsPage() {
   const load = useCallback(async () => {
     setError('');
     try {
-      const r = await clientProfileApi.get();
+      const r = await clientProfileApi.get(realm);
       setData(r);
       const eff = (r.effective || {}) as Record<string, unknown>;
       const f: Record<string, string> = {};
@@ -60,14 +74,15 @@ export default function SettingsPage() {
       Object.entries(h).forEach(([k, v]) => { hh[k] = String(v); });
       setHeaders(hh);
     } catch (e) { setError(errText(e)); }
-  }, []);
+  }, [realm]);
 
   useEffect(() => { load(); }, [load]);
 
   async function detect() {
     setDetecting(true);
     try {
-      const r = await clientProfileApi.detect();
+      // 探测**对应版本**的安装目录（cn=WorkBuddy / global=WorkBuddyAI）
+      const r = await clientProfileApi.detect(realm);
       notify.ok(r.has_client ? t('settings.detectOk') : t('settings.detectNone'));
       await load();
     } catch (e) { notify.err(errText(e)); }
@@ -84,7 +99,7 @@ export default function SettingsPage() {
         profile[key] = num ? Number(v) : v;
       });
       profile.headers = {...headers};
-      await clientProfileApi.save({profile});
+      await clientProfileApi.save({profile}, realm);
       notify.ok(t('settings.saved'));
       await load();
     } catch (e) { notify.err(errText(e)); }
@@ -93,7 +108,7 @@ export default function SettingsPage() {
 
   async function setSource(source: 'auto' | 'saved') {
     try {
-      await clientProfileApi.save({profile: {}, source});
+      await clientProfileApi.save({profile: {}, source}, realm);
       notify.ok(t('settings.saved'));
       await load();
     } catch (e) { notify.err(errText(e)); }
@@ -102,7 +117,8 @@ export default function SettingsPage() {
   async function reset() {
     setBusy(true);
     try {
-      await clientProfileApi.reset();
+      // 只重置当前版本 —— 不会动另一版
+      await clientProfileApi.reset(realm);
       notify.ok(t('settings.resetOk'));
       await load();
     } catch (e) { notify.err(errText(e)); }
@@ -145,6 +161,59 @@ export default function SettingsPage() {
           </div>
         }
       />
+
+      {/*
+        当前编辑的版本 + 两版一览。
+        两版参数必须各存各用；界面上如果只能一版一版切换着看，
+        很容易漏配另一版还不自知（那一版的账号会带错的客户端身份出站）。
+        所以把两版并排放在最上方，一眼能看到「另一版配了没、配的对不对」。
+      */}
+      <section className="rounded-lg border bg-card/40 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">{t('settings.editingRealm')}</span>
+          <Badge>{realmLabel}</Badge>
+          <span className="text-muted-foreground">
+            {t('settings.realmSwitchHint')}
+          </span>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          {(['cn', 'global'] as const).map((r) => {
+            const brief = data?.realms?.[r];
+            const isCurrent = r === realm;
+            return (
+              <div key={r}
+                className={cn('rounded-md border p-2 text-xs',
+                  isCurrent ? 'border-primary/60 bg-primary/5' : 'bg-background/40')}>
+                <div className="mb-1 flex items-center gap-2">
+                  <Badge variant={isCurrent ? 'default' : 'outline'}>
+                    {r === 'cn' ? t('realm.cn') : t('realm.global')}
+                  </Badge>
+                  {brief?.has_detected
+                    ? <Badge variant="secondary">{t('settings.detected')}</Badge>
+                    : <Badge variant="outline">{t('settings.notDetected')}</Badge>}
+                  {brief?.source && (
+                    <span className="text-muted-foreground">
+                      {brief.source === 'saved' ? t('settings.sourceSaved') : t('settings.sourceAuto')}
+                    </span>
+                  )}
+                </div>
+                {brief ? (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+                    <dt className="text-muted-foreground">application_name</dt>
+                    <dd className="truncate">{brief.application_name ?? '—'}</dd>
+                    <dt className="text-muted-foreground">turing_channel_id</dt>
+                    <dd>{brief.turing_channel_id ?? '—'}</dd>
+                    <dt className="text-muted-foreground">desktop_version</dt>
+                    <dd>{brief.desktop_version ?? '—'}</dd>
+                    <dt className="text-muted-foreground">UA</dt>
+                    <dd className="truncate" title={brief.ua}>{brief.ua ?? '—'}</dd>
+                  </dl>
+                ) : <p className="text-muted-foreground">—</p>}
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {/* 取值策略 */}
       <section className="flex flex-wrap items-center gap-4 rounded-xl border bg-card p-4">

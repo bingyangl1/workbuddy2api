@@ -467,6 +467,10 @@ export interface CreditExpiryStats {
   package_offset: number;
   package_limit: number;
   has_more: boolean;
+  /** 本次统计的范围：`cn` / `global` / `all`（未过滤）。 */
+  realm?: string;
+  /** 参与统计的账号数（配合 realm 用，便于确认过滤是否生效）。 */
+  accounts_total?: number;
 }
 
 /** credits/usage 账号消耗行 */
@@ -486,6 +490,8 @@ export interface CreditUsageStats {
   total_credits: number;
   accounts: CreditUsageAccount[];
   models: CreditUsageModel[];
+  /** 本次统计的范围：`cn` / `global` / `all`（未过滤）。 */
+  realm?: string;
 }
 
 /* ── 安全 / IP（routers/security.py，P2 T5/T6）──────────────────── */
@@ -552,6 +558,18 @@ export interface Schedule {
 }
 
 /* ── 客户端参数（routers/client_profile.py）────────────────────── */
+/** 某一版的档案摘要（`realms` 并排展示用）。 */
+export interface ClientProfileRealmBrief {
+  source: string;                    // auto（优先探测）/ saved（钉住保存值）
+  has_detected: boolean;             // 本机是否探测到该版客户端
+  application_name?: string;         // cn: WorkBuddy / global: workbuddy-ai
+  turing_channel_id?: number;        // cn: 109144 / global: 400111
+  turing_product_name?: string;
+  desktop_version?: string;
+  ua?: string;                       // 该版的完整出站 UA
+  error?: boolean;                   // 该版取值失败（另一版不受影响）
+}
+
 export interface ClientProfile {
   ok: boolean;
   has_client: boolean;
@@ -561,6 +579,18 @@ export interface ClientProfile {
   source?: string;
   sources?: Record<string, string>;
   message?: string;
+  /** 本次读取的是哪一版（后端回显，确认「我看的是哪一版」）。 */
+  realm?: string;
+  /**
+   * 两版并排摘要 —— 无论请求的是哪一版都会带。
+   *
+   * 有它才能在设置页一次看全两版；否则用户得一版一版切换着看，
+   * 很容易漏配另一版还不自知（那样国际版账号就会带国内版身份出站）。
+   */
+  realms?: Record<string, ClientProfileRealmBrief>;
+  /** saved 与 effective 的差异（哪些字段被别的层覆盖了）。 */
+  diff_saved_vs_effective?: Record<string, unknown>;
+  defaults?: Record<string, unknown>;
 }
 
 /* ── 系统（server.py + routers/releases.py）────────────────────── */

@@ -12,6 +12,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import {creditsApi, errText} from '@/lib/api';
 import type {CreditExpiryStats, CreditUsageStats, CreditWindow} from '@/lib/types';
+import {useRealm} from '@/lib/realm-context';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {StatCard} from '@/components/common/layout/StatCard';
 import {LoadError} from '@/components/common/states/LoadError';
@@ -44,22 +45,28 @@ function fmtDate(ms: number | null): string {
 
 export default function CreditsPage() {
   const t = useT();
+  const {realm, label: realmLabel} = useRealm();
   const [expiry, setExpiry] = useState<CreditExpiryStats | null>(null);
   const [usage, setUsage] = useState<CreditUsageStats | null>(null);
   const [error, setError] = useState('');
   const [days, setDays] = useState('7');
+  /** true = 看两版合计（不对 realm 过滤）；false = 只看当前版本。 */
+  const [watchAll, setWatchAll] = useState(false);
 
+  // 积分按版本过滤：两版积分体系不通用（不同上游域、不同计费规则），
+  // 混在一起看不出「是哪一版的账号缺积分」。`watchAll` 用于跨版总览。
   const load = useCallback(async () => {
     setError('');
     try {
+      const scope = watchAll ? undefined : realm;
       const [eRes, uRes] = await Promise.all([
-        creditsApi.expiry({days: 7}),
-        creditsApi.usage({days: Number(days) || 7}),
+        creditsApi.expiry({days: 7, realm: scope}),
+        creditsApi.usage({days: Number(days) || 7, realm: scope}),
       ]);
       setExpiry(eRes);
       setUsage(uRes);
     } catch (e) { setError(errText(e)); }
-  }, [days]);
+  }, [days, realm, watchAll]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -71,6 +78,36 @@ export default function CreditsPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader title={t('credits.title')} description={t('credits.subtitle')} />
+
+      {/*
+        版本范围提示条。
+        两版积分体系不通用（不同上游域、不同计费规则），默认跟随右上角的版本切换；
+        这里额外给一个「看两版合计」的开关 —— 想总览时不必来回切版本。
+        无论哪种视图，都明确标出「当前看的是哪一版」，避免看着国内版数字
+        去判断国际版的情况（这正是用户报过的那类困惑）。
+      */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/40 px-3 py-2 text-xs">
+        <span className="text-muted-foreground">
+          {t('credits.scope')}
+        </span>
+        <Badge variant={watchAll ? 'outline' : 'default'}>
+          {watchAll ? t('credits.scopeAll') : realmLabel}
+        </Badge>
+        {!watchAll && (
+          <span className="text-muted-foreground">
+            {expiry.accounts_total != null
+              ? t('credits.scopeAccounts', {n: String(expiry.accounts_total)})
+              : ''}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setWatchAll((v) => !v)}
+          className="ml-auto rounded-md border px-2 py-1 text-xs hover:bg-accent"
+        >
+          {watchAll ? t('credits.scopeOnlyThis') : t('credits.scopeAllBtn')}
+        </button>
+      </div>
 
       <Tabs defaultValue="expiry">
         <TabsList>

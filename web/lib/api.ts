@@ -179,7 +179,18 @@ export const accountApi = {
   /** 去重：同 uid 只留 id 最小（历史记录最全）那条。 */
   dedupe: () => post<{removed: number; kept: number; items: {id: number; name: string; uid: string}[]}>(
     '/api/accounts/dedupe'),
-  syncCredits: () => post<{ok: boolean; synced: number}>('/api/accounts/credits/sync'),
+  /**
+   * 立即重采积分到期快照。
+   *
+   * ⚠️ **会真实请求上游**（逐号拉账单）。账号多时务必用 `realm` 收窄范围，
+   * 或改用定时任务 —— 频繁全量触发对上游是很明显的机器特征。
+   * `realm` 留空 = 全部活跃账号（既有行为）。
+   */
+  syncCredits: (realm?: string) => post<{
+    ok: boolean; total: number; refreshed: number; failed: number;
+    credits_expiring_soon: number; realm: string;
+    detail: {id: number; account: string; ok: boolean; error?: string}[];
+  }>('/api/accounts/credits/sync', realm ? {realm} : {}),
   /** 扫描本机客户端登录目录（服务端读，不向前端暴露 token）。 */
   scanLocal: () => get<ScanLocalResult>('/api/accounts/scan-local'),
   /** 导入本机 .info：files 为空 + all=true 导入全部。 */
@@ -239,8 +250,18 @@ export const modelApi = {
   batchToggle: (model_ids: string[], enabled: boolean, level = 'system') =>
     post<{updated: number; enabled: boolean}>('/api/models/batch-toggle', {model_ids, enabled, level}),
   remove: (id: number) => del<{id: number; model_id: string; ok: boolean}>(`/api/models/${id}`),
-  // 契约返回 {total_fetched, added, updated, total_in_db, enabled}
-  sync: () => post<{total_fetched: number; added: number; updated: number; total_in_db: number; enabled: number}>('/api/models/sync'),
+  /**
+   * 从上游拉取模型清单并入库。
+   *
+   * `realm` **必须传对**：不同版本要从**对应版本的上游**拉清单
+   * （国内版 `copilot.tencent.com` / 国际版 `www.workbuddy.ai`）。
+   * 不传的话后端只能按 id 挑第一个活跃账号，切到国际版时依然会拿国内版账号
+   * 去拉 —— 用户实测报过这个现象。
+   */
+  sync: (realm: string = 'cn') =>
+    post<{realm: string; source_account_id: number; total_fetched: number;
+          added: number; updated: number; total_in_db: number; enabled: number}>(
+      '/api/models/sync', {realm}),
   busy: () => get<ModelBusyResponse>('/api/models/busy'),
   // 模型中心目录（P4）：按 realm 直连腾讯，含 source 来源标注
   catalog: (realm: string = 'cn', force = false) =>
@@ -298,9 +319,16 @@ export const statsApi = {
 
 /* ── 积分（routers/credits.py）──────────────────────────────────── */
 export const creditsApi = {
-  expiry: (params?: {days?: number; include_disabled?: boolean}) =>
+  /**
+   * 积分到期总览。
+   *
+   * `realm` 按版本过滤（`cn` / `global` / 空=两版合计）。
+   * 两版积分体系不通用，混在一起看不出是哪一版缺积分。
+   */
+  expiry: (params?: {days?: number; include_disabled?: boolean; realm?: string}) =>
     get<CreditExpiryStats>('/api/credits/expiry', params as Record<string, unknown>),
-  usage: (params?: {days?: number; account_id?: number; top?: number}) =>
+  /** 积分消耗构成（`realm` 同上）。 */
+  usage: (params?: {days?: number; account_id?: number; top?: number; realm?: string}) =>
     get<CreditUsageStats>('/api/credits/usage', params as Record<string, unknown>),
 };
 
@@ -348,11 +376,33 @@ export const scheduleApi = {
 };
 
 /* ── 客户端参数（routers/client_profile.py）────────────────────── */
+/**
+ * 出站伪装的客户端参数档案。
+ *
+ * **必须按 realm 分开操作**：两版客户端身份本质不同（解包实测）——
+ *
+ *     | 字段            | cn           | global          |
+ *     |-----------------|--------------|-----------------|
+ *     | applicationName | `WorkBuddy`  | `workbuddy-ai`  |
+ *     | desktop_version | 5.8.3        | 5.8.4           |
+ *     | turingChannelId | 109144       | 400111          |
+ *
+ * 只存一份的话，国际版账号会带国内版身份出站 —— 上游一比对就知道不是官方客户端。
+ */
 export const clientProfileApi = {
-  get: () => get<ClientProfile>('/api/client-profile'),
-  save: (body: Record<string, unknown>) => put<ClientProfile>('/api/client-profile', body),
-  detect: () => post<ClientProfile>('/api/client-profile/detect'),
-  reset: () => post<{ok: boolean}>('/api/client-profile/reset'),
+  /** 读取某一版的档案（响应另含 `realms`：两版并排摘要）。 */
+  get: (realm: string = 'cn') =>
+    get<ClientProfile>('/api/client-profile', {realm}),
+  /** 保存某一版（`realm` 也可放在 body 里）。 */
+  save: (body: Record<string, unknown>, realm: string = 'cn') =>
+    put<ClientProfile>('/api/client-profile', {...body, realm}),
+  /** 现场探测**对应版本**的安装目录（只读，不写库）。 */
+  detect: (realm: string = 'cn') =>
+    post<ClientProfile & {realm?: string; message?: string}>(
+      '/api/client-profile/detect', {realm}),
+  /** 重置（**只重置指定版本** —— 不会动另一版）。 */
+  reset: (realm: string = 'cn') =>
+    post<{ok: boolean; realm: string}>('/api/client-profile/reset', {realm}),
 };
 
 /* ── 线上同步（routers/sync.py）────────────────────────────────── */

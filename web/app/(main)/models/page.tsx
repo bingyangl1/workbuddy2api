@@ -12,6 +12,7 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {modelApi, errText} from '@/lib/api';
 import type {ModelConfig, ModelGroup, ModelBusy, SpeedTestResult} from '@/lib/types';
+import {useRealm} from '@/lib/realm-context';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {LoadError} from '@/components/common/states/LoadError';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
@@ -44,6 +45,9 @@ import {
 
 export default function ModelsPage() {
   const t = useT();
+  // 模型清单按版本隔离（国际版条目带 `global:` 前缀）。同步时必须把当前版本
+  // 传给后端 —— 否则会拿国内版账号去拉国际版的清单。
+  const {realm, label: realmLabel} = useRealm();
   const [configs, setConfigs] = useState<ModelConfig[] | null>(null);
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [busy, setBusy] = useState<Record<string, ModelBusy>>({});
@@ -107,7 +111,11 @@ export default function ModelsPage() {
   async function doSync() {
     setSyncing(true);
     try {
-      const r = await modelApi.sync();
+      // **必须带上 realm**：不同版本要从对应版本的上游拉清单
+      // （国内版 copilot.tencent.com / 国际版 www.workbuddy.ai）。
+      // 不传的话后端只能按 id 挑第一个活跃账号 —— 切到国际版时依然会拿国内版
+      // 账号去拉、把国内版清单写进库（用户实测报过这个现象）。
+      const r = await modelApi.sync(realm);
       notify.ok(t('models.synced', {added: r.added, updated: r.updated, total: r.total_in_db}));
       await load();
     } catch (e) { notify.err(errText(e)); }

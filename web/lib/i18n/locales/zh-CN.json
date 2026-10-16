@@ -1643,7 +1643,13 @@
     "srcSaved": "已保存",
     "srcDetected": "本机探测",
     "srcDefault": "默认",
-    "footHint": "改动会直接影响出站请求伪装，保存即生效（merge 语义，只改提交的字段）。"
+    "footHint": "改动会直接影响出站请求伪装，保存即生效（merge 语义，只改提交的字段）。",
+    "editingRealm": "正在编辑：",
+    "realmSwitchHint": "（右上角切换版本；两版参数必须分别配置，混用会被上游识别）",
+    "detected": "已探测到本机客户端",
+    "notDetected": "未探测到客户端",
+    "sourceSaved": "钉住已保存值",
+    "sourceAuto": "优先现场探测"
   },
   "redPacket": {
     "title": "红包",
@@ -1821,7 +1827,12 @@
     "colRemain": "剩余",
     "colShare": "占比",
     "colModel": "模型",
-    "colRequests": "请求数"
+    "colRequests": "请求数",
+    "scope": "统计范围",
+    "scopeAll": "两版合计",
+    "scopeAccounts": "（{n} 个账号）",
+    "scopeAllBtn": "看两版合计",
+    "scopeOnlyThis": "只看当前版本"
   },
   "tokens": {
     "title": "访问令牌",

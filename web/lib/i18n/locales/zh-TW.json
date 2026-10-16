@@ -1643,7 +1643,13 @@
     "srcSaved": "已儲存",
     "srcDetected": "本機探測",
     "srcDefault": "預設",
-    "footHint": "改動會直接影響出站請求偽裝，儲存即生效（merge 語義，只改提交的欄位）。"
+    "footHint": "改動會直接影響出站請求偽裝，儲存即生效（merge 語義，只改提交的欄位）。",
+    "editingRealm": "正在編輯：",
+    "realmSwitchHint": "（右上角切換版本；兩版參數必須分別設定，混用會被上游識別）",
+    "detected": "已偵測到本機用戶端",
+    "notDetected": "未偵測到用戶端",
+    "sourceSaved": "釘住已儲存值",
+    "sourceAuto": "優先現場偵測"
   },
   "phrases": {
     "请求失败": "請求失敗",
@@ -2030,7 +2036,12 @@
     "colRemain": "剩餘",
     "colShare": "佔比",
     "colModel": "模型",
-    "colRequests": "請求數"
+    "colRequests": "請求數",
+    "scope": "統計範圍",
+    "scopeAll": "兩版合計",
+    "scopeAccounts": "（{n} 個帳號）",
+    "scopeAllBtn": "看兩版合計",
+    "scopeOnlyThis": "只看目前版本"
   },
   "tokens": {
     "title": "存取權杖",

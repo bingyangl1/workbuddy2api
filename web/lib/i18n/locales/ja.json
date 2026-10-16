@@ -1643,7 +1643,13 @@
     "srcSaved": "保存済み",
     "srcDetected": "検出",
     "srcDefault": "既定",
-    "footHint": "変更は送信偽装に直接影響し、保存で即時有効になります（merge セマンティクス — 送信したフィールドのみ変更）。"
+    "footHint": "変更は送信偽装に直接影響し、保存で即時有効になります（merge セマンティクス — 送信したフィールドのみ変更）。",
+    "editingRealm": "編集中：",
+    "realmSwitchHint": "（右上でバージョンを切替。両バージョンのパラメータは個別に設定が必要 — 混用は上流で検知されます）",
+    "detected": "ローカルクライアントを検出",
+    "notDetected": "クライアント未検出",
+    "sourceSaved": "保存値を固定",
+    "sourceAuto": "ライブ検出を優先"
   },
   "phrases": {
     "请求失败": "リクエストに失敗しました",
@@ -2030,7 +2036,12 @@
     "colRemain": "残り",
     "colShare": "割合",
     "colModel": "モデル",
-    "colRequests": "リクエスト数"
+    "colRequests": "リクエスト数",
+    "scope": "集計範囲",
+    "scopeAll": "両バージョン合計",
+    "scopeAccounts": "（{n} アカウント）",
+    "scopeAllBtn": "両バージョン合計を表示",
+    "scopeOnlyThis": "現在のバージョンのみ"
   },
   "tokens": {
     "title": "アクセストークン",

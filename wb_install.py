@@ -132,20 +132,35 @@ _REALM_BASE_NAMES = {
 #:
 #: 这些值取自两版客户端实测（cli/product.json + install-manifest.json）：
 #:   cn     : applicationName=WorkBuddy      channel=109144 product=WorkBuddy
+#:            desktop_version=5.8.3  cli_version=2.161.0
 #:   global : applicationName=workbuddy-ai   channel=400111 product=WorkBuddy AI
+#:            desktop_version=5.8.4  cli_version=2.161.0
 #:
 #: 为什么要兜底而不是「探测不到就留空」：留空会让 UA 退化成国内版形态，
 #: 那正是要避免的风控特征。宁可报一个已知的官方值。
+#:
+#: **`desktop_version` 必须按 realm 分开给**（曾经两版共用 DEFAULTS 的版本，
+#: 是个真 bug）：UA 是 `${applicationName}/${productVersion}` 拼的，所以
+#: 「品牌段对、版本段错」会拼出 `workbuddy-ai/5.8.3` —— 而官方国际版是
+#: `workbuddy-ai/5.8.4`。这种「半对」比全错更危险：除了版本号以外一切正常，
+#: 出问题时极难想到是版本号。
+#:
+#: 版本号会随官方发版变化（这里只是「探测不到时的最佳猜测」）。
+#: 探测得到时永远以本机实际安装版本为准。
 REALM_FALLBACKS: dict[str, dict] = {
     "cn": {
         "application_name": "WorkBuddy",
         "turing_product_name": "WorkBuddy",
         "turing_channel_id": 109144,
+        "desktop_version": "5.8.3",
+        "cli_version": "2.161.0",
     },
     "global": {
         "application_name": "workbuddy-ai",
         "turing_product_name": "WorkBuddy AI",
         "turing_channel_id": 400111,
+        "desktop_version": "5.8.4",
+        "cli_version": "2.161.0",
     },
 }
 
@@ -541,7 +556,19 @@ class _WorkBuddyInstall:
 
         # 1) 显式指定：既接受安装基目录，也接受 resources/ 或 app.asar 本身。
         #    expand_path 顺带处理引号 / %VAR% / ~（用户手输路径的常见写法）。
-        explicit = self._explicit_install()
+        #
+        # **realm 感知（真 bug 修正）**：覆盖值只有**一个**路径，无法表达
+        # 「国内版在这里、国际版在那里」。所以按 realm 探测时，只有当这个
+        # 覆盖路径**确实属于该 realm** 才采用；否则跳过它、走自动扫描。
+        #
+        # 曾经的后果：后台设过 `wb_paths.install_dir = D:\Software\WorkBuddy`
+        # （国内版），于是 `_realm_data("global")` 也返回那个国内版目录 ——
+        # **国际版账号带着整套国内版身份出站**（品牌/版本/渠道号全错）。
+        #
+        # 为什么特别难发现：全新进程里直接调用探测是**正确的**（没有 DB 覆盖），
+        # 只有长驻引擎读了后台覆盖才触发。本机两版都装了也不会复现。
+        explicit_ok = self._explicit_matches_realm()
+        explicit = self._explicit_install() if explicit_ok else ""
         if explicit:
             try:
                 e = expand_path(explicit)
@@ -557,7 +584,7 @@ class _WorkBuddyInstall:
                 out.append(e / "resources" / "..")
 
         # 1b) 直接指定 app.asar（最精确，跳过整个扫描）
-        a = self._explicit_asar()
+        a = self._explicit_asar() if explicit_ok else None
         if a is not None:
             out.append(a.parent.parent)          # <install>/resources/app.asar
             out.append(a)                        # 也把文件本身当候选
@@ -603,6 +630,55 @@ class _WorkBuddyInstall:
         if rf in _REALM_BASE_NAMES:
             return _REALM_BASE_NAMES[rf]
         return _BASE_NAMES
+
+    def _explicit_matches_realm(self) -> bool:
+        """当前（若在做 realm 探测）的显式覆盖路径是否属于该 realm。
+
+        * 没在做 realm 探测（`_realm_filter` 为空）→ True：
+          主探测必须尊重用户的显式指定（这是既有行为，零回归）。
+        * 在做 realm 探测 → 判断覆盖路径的**目录名**是否在该 realm 的名字集合里。
+
+        判据用目录名而不是完整路径：用户可能把国际版装在
+        `D:\\Software\\WorkBuddyAI` 或 `E:\\apps\\workbuddy-ai`，
+        共同点是**目录名**含该版的标识。
+        """
+        rf = (getattr(self, "_realm_filter", "") or "").strip().lower()
+        if not rf or rf not in _REALM_BASE_NAMES:
+            return True
+        raw = self._explicit_install() or ""
+        asar_raw = ""
+        try:
+            asar_raw = (os.getenv("WORKBUDDY_ASAR_PATH")
+                        or self._override.get("asar_path") or "")
+        except Exception:
+            asar_raw = ""
+        target = raw or asar_raw
+        if not target:
+            # 没有显式覆盖 → 交回自动扫描（也是 realm 感知的）
+            return True
+        name = ""
+        try:
+            p = Path(str(target).strip().strip('"').replace("/", os.sep))
+            # 若指向 app.asar 或 resources，往上找到安装目录名
+            if p.name.lower() in ("app.asar", "resources"):
+                p = p.parent.parent if p.name.lower() == "app.asar" else p.parent
+            name = p.name
+        except Exception:
+            name = str(target)
+        low = name.lower()
+        allowed = tuple(n.lower() for n in _REALM_BASE_NAMES[rf])
+        # 目录名命中该 realm 的任一别名（含前缀匹配：WorkBuddyAI 属于
+        # global 的 "workbuddyai"；"WorkBuddy" 属于 cn 的 "workbuddy"）
+        if low in allowed:
+            return True
+        # 兜底：按「最长别名优先」判断归属，避免 WorkBuddy 误判成 global
+        for other, names in _REALM_BASE_NAMES.items():
+            if other == rf:
+                continue
+            if any(low == n.lower() for n in names):
+                return False
+        # 名字里含 realm 标识（如 "MyWorkBuddyAI-5.8.4"）
+        return any(n.lower() in low for n in _REALM_BASE_NAMES[rf])
 
     # -- 内部：读 json / exe 版本 / CLI 版本 ------------------------------
     @staticmethod
@@ -1009,24 +1085,42 @@ class _WorkBuddyInstall:
                 "stat": stat}
 
     def desktop_version(self, realm: str = "") -> str:
-        """桌面端版本：env 覆盖 > 安装包元数据 > exe 资源 > 兜底默认。
+        """桌面端版本：env 覆盖 > 安装包元数据 > **realm 兜底** > 通用默认。
 
         `realm` 非空时取**该版本客户端**的版本号（本机两版都装时必需：
         国内版 5.8.3 / 国际版 5.8.4，报错版本号是明显风控特征）。
+
+        **为什么 realm 兜底必须在这里**（真 bug）：UA 是
+        `${applicationName}/${productVersion}` 拼的。若只对 application_name
+        做 realm 兜底、版本号回落到通用 DEFAULTS，会拼出 **`workbuddy-ai/5.8.3`**
+        —— 品牌段是国际版、版本段是国内版。这种「半对」比全错更难发现：
+        除了版本号，其余一切正常。探测不到客户端的环境（线上服务器、
+        扫描范围没覆盖）**每次**都会命中这个组合。
         """
         env = (os.getenv("WORKBUDDY_DESKTOP_VERSION") or "").strip()
         if env:
             return env
         d = self._realm_data(realm) if realm else self._data()
-        return d["desktop_version"] or DEFAULT_DESKTOP_VERSION
+        v = d.get("desktop_version") or ""
+        if not v and realm:
+            # 探测不到该版客户端：用该版的已知官方版本，而不是通用默认值
+            v = REALM_FALLBACKS.get(realm.strip().lower(), {}).get("desktop_version") or ""
+        return v or DEFAULT_DESKTOP_VERSION
 
     def cli_version(self, realm: str = "") -> str:
-        """内嵌 CLI 版本：env 覆盖 > dist 内嵌元数据 > 兜底默认。"""
+        """内嵌 CLI 版本：env 覆盖 > dist 内嵌元数据 > **realm 兜底** > 通用默认。
+
+        两版 CLI 版本实测相同（2.161.0），但仍按 realm 查 —— 万一将来分开，
+        这里不会静默沿用国内版的值。
+        """
         env = (os.getenv("WORKBUDDY_CLI_VERSION") or "").strip()
         if env:
             return env
         d = self._realm_data(realm) if realm else self._data()
-        return d["cli_version"] or DEFAULT_CLI_VERSION
+        v = d.get("cli_version") or ""
+        if not v and realm:
+            v = REALM_FALLBACKS.get(realm.strip().lower(), {}).get("cli_version") or ""
+        return v or DEFAULT_CLI_VERSION
 
     def desktop_ua(self, realm: str = "") -> str:
         """官方桌面端三段式 UA：`<applicationName>/<v> <applicationName>/<v> CLI/<cli>`。
