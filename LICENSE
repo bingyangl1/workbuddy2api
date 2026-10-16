@@ -33,3 +33,11 @@ Third-party notices:
   Copyright (c) 2025 linux.do, MIT License.
 - Backend account-pool interaction lineage: Sliverkiss/workbuddy2api
   (https://github.com/Sliverkiss/workbuddy2api), MIT License.
+  NOTE: the original upstream repository was deleted in October 2026
+  (github.com/Sliverkiss/workbuddy2api now returns 404); the licence and
+  attribution are retained as required, and the community continuation
+  repository is credited below.
+- Protocol-level fixes are synced from the community continuation of the
+  original upstream: HanawaBanana/workbuddy2api
+  (https://github.com/HanawaBanana/workbuddy2api), MIT License.
+  (e.g. unconditional outbound X-Conversation-ID, issue #36)

@@ -4,20 +4,25 @@
 >
 > **本仓库**：<https://github.com/bingyangl1/workbuddy2api>
 >
-> 本仓库是 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的演进 fork，
+> 本仓库是 workbuddy2api 的演进 fork（原始上游 `Sliverkiss/workbuddy2api` **已于 2026-10 删库**，
+> 现由社区延续仓库 [HanawaBanana/workbuddy2api](https://github.com/HanawaBanana/workbuddy2api) 维护，Go 实现、MIT），
 > 在保留上游「OpenAI/Anthropic 兼容反代 + 账号池自动化运营」全部能力的基础上，
 > 吸收了 [ithtelab/workbuddy-manager](https://github.com/ithtelab/workbuddy-manager)（MIT）的运营优势。
 >
 > **本 fork 的新增主线**（详见 [CHANGELOG.md](CHANGELOG.md) 与 [docs-dev/](docs-dev/README.md)）：
 >
 > - **国际版 realm 双域**：CN / Global（workbuddy.ai）端点分派、模型 `cn:`/`global:` 前缀路由、密钥版本隔离、任务按 realm 门控
+> - **客户端参数按 realm 分档**：两版客户端身份（UA 品牌段 / 渠道号 / 版本号 / 扩展名）各存各用 —— `WorkBuddy`+`109144` vs `workbuddy-ai`+`400111`；混用是最明显的风控特征
 > - **密钥运营面**：每密钥全维度（有效期 / 最大 IP 数 / IP 白名单 / Token 配额）、`/v1/usage` 自查、入站 IP 治理、模型别名、只读管理 Token、操作审计、账号池分组隔离
-> - **面板现代化（P3 完成）**：`web/` Next.js 15 静态导出 + shadcn/ui + Tailwind v4 + 五语言 i18n（zh-CN/zh-TW/en/ja/ko），**14/14 页面 parity**；FastAPI 同源托管 `/panel`，旧面板保留 `/admin-legacy` 并用 `ADMIN_DEFAULT_PANEL` 切换默认；深浅色跟随系统 + 手动切换、移动端 375px 响应式；`ADMIN_UPSTREAM_READONLY` 测试护栏防测试误伤账号
+> - **面板现代化（P3 完成）**：`web/` Next.js 15 静态导出 + shadcn/ui + Tailwind v4 + 五语言 i18n（zh-CN/zh-TW/en/ja/ko），**22 个页面 / 平价验收 35/35 零缺口**；侧边栏导航 + 用户自定义布局（显示隐藏/排序/改名）；FastAPI 同源托管 `/panel`，旧面板保留 `/admin-legacy` 并用 `ADMIN_DEFAULT_PANEL` 切换默认；深浅色跟随系统 + 手动切换、移动端 375px 响应式；`ADMIN_UPSTREAM_READONLY` 测试护栏防测试误伤账号
 > - **模型中心（P4 完成）**：按 realm 直连腾讯模型目录（显示名 / 描述 / 上下文 / 最大输出 / 推理档位 / 积分倍率 / 能力标记），回退上游清单并**如实标注来源**；`/panel/models/catalog` 按系列分组、搜索、能力筛选、排序浏览
 > - **聊天测试台（P4 完成）**：管理员免密钥直调真实模型，**走同一号池状态机**（选号 / 在途租约 / 错误分类 / 记账一份实现），记账口径与 `/v1` 一致（`key_id=0` + `use_case=playground` 区分）；流式可中断、右下角实时显示本次积分消耗
 > - **备份与更新（P5 完成）**：本地快照备份/恢复（全 15 张业务表，恢复前自动留底、单事务回滚、含密/脱敏双模式）；`scripts/update.py` 一键更新（三模式，**先验签后解压**，OpenSSH 签名）；`scripts/security_baseline.py` 更新后自动重施安全基线；`/panel/changelog` 离线更新日志查看器
 >
-> **署名链（MIT）**：Sliverkiss/workbuddy2api → ithtelab/workbuddy-manager → linux-do/cdk（UI 设计令牌）。详见 [LICENSE](LICENSE) 的 Third-party notices。
+> **上游吸收**：协议的字段级修正我们从社区延续仓库同步（每个吸收项单独提交并注明来源）。
+> 已吸收 / 待评估 / 明确不吸收三张清单见 [docs-dev/UPSTREAM-ABSORB.md](docs-dev/UPSTREAM-ABSORB.md)。
+>
+> **署名链（MIT）**：Sliverkiss/workbuddy2api（已删库）→ HanawaBanana/workbuddy2api（延续）→ ithtelab/workbuddy-manager → linux-do/cdk（UI 设计令牌）。详见 [LICENSE](LICENSE) 的 Third-party notices。
 >
 > ---
 
@@ -2711,7 +2716,8 @@ cache miss     5.2 ms      每 30 秒最多一次
 | 项目 | 作者 | 许可 | 本项目参考的内容 |
 |------|------|------|------------------|
 | [HanHan666666/codebuddy2openai](https://github.com/HanHan666666/codebuddy2openai) | HanHan666666 | MIT | 最早期的思路来源：把桌面端登录态转成 OpenAI 兼容接口 |
-| [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) | Sliverkiss | MIT | 多账号池、错误分类与账号处置、会话粘性、限速/保活等**设计思路** |
+| **Sliverkiss/workbuddy2api**（原上游，**2026-10 已删库**） | Sliverkiss | MIT | 多账号池、错误分类与账号处置、会话粘性、限速/保活等**设计思路**（本 fork 的基底） |
+| [HanawaBanana/workbuddy2api](https://github.com/HanawaBanana/workbuddy2api) | HanawaBanana | MIT | **社区延续仓库**（Go）：协议的字段级修正从它同步（如 `X-Conversation-ID` 恒发） |
 | [linguo2625469/workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel) | linguo2625469 | MIT | 可视化运维面板的信息架构与交互设计思路 |
 
 ### 参考的**程度**：思路，不是代码
