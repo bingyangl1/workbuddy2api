@@ -310,19 +310,82 @@ def _prune_runtime_fragments(role: str, text: str) -> str:
         else:
             pruned = _CODEX_CORE_SUMMARY
 
-    if role == "user" and _looks_like_harness_user_message(pruned):
-        if (
-            "# AGENTS.md instructions" in pruned
-            or "<environment_context>" in text
-            or "<skills_instructions>" in text
-        ):
-            return (
-                "Repository instructions and durable user context are provided. "
-                "Follow repository guidance while answering the user's actual request."
-            )
+    if role == "user" and _looks_like_harness_user_message(text):
+        # **保留用户真实输入**，只在「整条都是 harness 注入」时才替换成摘要。
+        #
+        # 为什么（真实 bug，症状很迷惑）：Claude Code 常把提问和 harness 注入
+        # 写进**同一条** user 消息：
+        #
+        #     <system-reminder>…</system-reminder>
+        #
+        #     What is 1+1?
+        #
+        # 原先这里无条件 return 固定摘要 → **把用户提问一并吞掉** → 模型首轮
+        # 只回 "I'm ready to help..."，要第二轮才正常回答。用户看到的是
+        # 「第一次提问没反应」，很难联想到是我们把问题删了。
+        #
+        # 判定与抽取都用**原始 `text`**（不是 `pruned`）：`pruned` 上面已被
+        # 替换流程动过（成对块换成了摘要占位串），拿它做抽取会把用户提问
+        # 连同占位串一起丢掉 —— 那就修了个寂寞。
+        residual = _extract_user_payload(text)
+        if residual:
+            return residual
+        return (
+            "Repository instructions and durable user context are provided. "
+            "Follow repository guidance while answering the user's actual request."
+        )
 
     pruned = re.sub(r"\n{3,}", "\n\n", pruned).strip()
     return pruned
+
+
+def _extract_user_payload(text: str) -> str:
+    """剥掉 harness 注入块与尾部元数据，**保留用户真实输入**（可能为空）。
+
+    与「整条替换成摘要」的区别：本函数是**减法** —— 只删注入的部分，
+    剩下什么就留什么。返回空串表示「这条消息里除了注入之外没有别的内容」，
+    调用方据此决定是否用摘要兜底。
+
+    处理三类注入（都是 harness 加的、不是用户写的）：
+      1. `_RUNTIME_BLOCK_REPLACEMENTS` 里的成对块（如 `<system-reminder>…</…>`）
+         —— 含**未闭合**的尾块（截断/异常注入时只有起始标签）
+      2. `_RUNTIME_TAIL_MARKERS` 之后的尾巴（运行时工具/agent/skill 清单）
+      3. 前面替换流程留下的摘要占位串（再遇到时清掉，避免摘要叠摘要）
+    """
+    if not text:
+        return ""
+    out = text
+    for start_tag, end_tag, _replacement in _RUNTIME_BLOCK_REPLACEMENTS:
+        # 成对块：连同标签一起删（含标签内外多余的空白）
+        out = re.sub(
+            r"\s*" + re.escape(start_tag) + r".*?" + re.escape(end_tag) + r"\s*",
+            "\n",
+            out,
+            flags=re.DOTALL,
+        )
+        # 未闭合的尾块（常见于被截断的注入）：从起始标签删到结尾
+        if start_tag in out and end_tag not in out:
+            out = re.sub(r"\s*" + re.escape(start_tag) + r".*$", "\n", out,
+                         flags=re.DOTALL)
+
+    # 尾部运行时元数据：从最早出现的 marker 起截断
+    tail_at = [out.find(m) for m in _RUNTIME_TAIL_MARKERS if m in out]
+    tail_at = [i for i in tail_at if i >= 0]
+    if tail_at:
+        out = out[:min(tail_at)]
+
+    # 纯「文件头行」形态的注入：`# AGENTS.md instructions for <path>` 这类
+    # **没有成对标签**的裸行（Codex 会单独发一行）。它们整行都是注入，
+    # 留着会让「剥完是否为空」的判定误判为「有用户内容」。
+    out = re.sub(r"(?m)^\s*#\s*AGENTS\.md instructions for .*$", "", out)
+    out = re.sub(r"(?m)^\s*#\s*CLAUDE\.md.*$", "", out)
+
+    # 前面流程留下的摘要占位串：清掉（否则会出现「摘要 + 残留提问」的怪组合）
+    for _start, _end, replacement in _RUNTIME_BLOCK_REPLACEMENTS:
+        out = out.replace(replacement, " ")
+    out = out.replace(_RUNTIME_TAIL_SUMMARY, " ")
+
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
 
 
 def _compact_harness_message(role: str, content) -> str | None:
@@ -355,6 +418,12 @@ def _compact_harness_message(role: str, content) -> str | None:
             "Runtime skill metadata is available. Use relevant skills only when explicitly requested or clearly applicable."
         )
     if role == "user" and _looks_like_harness_user_message(content):
+        # 同上：混排时只剥注入、保留提问；纯注入才用摘要兜底。
+        # 这里用**原始 text** 而不是 `pruned` —— `pruned` 已经被前面的替换流程
+        # 动过（块被换成摘要占位串），再抽取会把用户提问连同占位一起丢掉。
+        residual = _extract_user_payload(text)
+        if residual:
+            return residual
         return (
             "Repository instructions and environment context are provided. Follow repository guidance "
             "while answering the user's actual request."
