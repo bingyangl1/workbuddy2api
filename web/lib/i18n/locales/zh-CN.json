@@ -1886,7 +1886,13 @@
     "task.daily_checkin": "每日签到领取积分",
     "task.refresh_growth_tasks": "每日更新成长任务列表",
     "task.run_growth_tasks": "每日自动做成长任务",
-    "task.keepalive_tokens": "token 保活（按整点）"
+    "task.keepalive_tokens": "token 保活（按整点）",
+    "realmNote": "国际版账号的门控",
+    "realmNoteDesc": "国际版（global）账号没有签到 / 成长 / 猫猫旅行 / 开学季 / 夜猫等体系，这些任务会自动跳过它们并在结果里报「N 个国际版账号无此活动已跳过」。余额刷新、积分同步、模型同步、Token 保活**照常执行**。",
+    "realmTagGlobal": "国际版不适用",
+    "realmApplicable": "适用版本",
+    "realmBoth": "国内版 + 国际版",
+    "realmCnOnly": "仅国内版"
   },
   "growth": {
     "title": "成长计划",

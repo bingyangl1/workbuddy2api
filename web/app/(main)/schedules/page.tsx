@@ -47,6 +47,21 @@ const TASK_KEYS = [
   'refresh_growth_tasks', 'run_growth_tasks', 'keepalive_tokens',
 ] as const;
 
+/**
+ * 任务域门控：这些任务**仅国内版（cn）账号适用**。
+ *
+ * 依据 `admin/scheduler.py` 的 `_task_realm()` 门控（镜像上游 Go scheduler）：
+ * 国际版（global）账号没有签到 / 成长 / 猫猫旅行 / 开学季 / 夜猫体系，
+ * 引擎在这些任务里会自动跳过 global 账号，并在结果里报
+ * 「N 个国际版账号无此活动已跳过」——**不是失败**。
+ *
+ * 界面上必须标出来：否则用户看到「已跳过」会以为任务出错了。
+ * 余额刷新 / 积分同步 / 模型同步 / Token 保活对两种版本都有效。
+ */
+const CN_ONLY_TASKS: readonly string[] = [
+  'daily_checkin', 'refresh_growth_tasks', 'run_growth_tasks',
+];
+
 function fmtIso(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -138,6 +153,14 @@ export default function SchedulesPage() {
         }
       />
 
+      {/* 版本门控说明：国际版账号没有签到/成长体系，相关任务会自动跳过它们
+          （引擎返回 realm_skipped，不是失败）。不说明的话用户会以为任务出错。 */}
+      <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{t('schedules.realmNote')}</span>
+        <span className="mx-1.5">·</span>
+        {t('schedules.realmNoteDesc')}
+      </div>
+
       {items.length === 0 ? (
         <EmptyState title={t('schedules.empty')} />
       ) : (
@@ -160,9 +183,19 @@ export default function SchedulesPage() {
                 return (
                   <TableRow key={s.id} className={cn(!s.enabled && 'opacity-55')}>
                     <TableCell>
-                      <div className="flex flex-col">
+                      <div className="flex flex-col gap-0.5">
                         <span className="text-xs font-medium">{s.name || s.task_label}</span>
                         <span className="font-mono text-[10px] text-muted-foreground">{s.task}</span>
+                        {/* 版本适用性：国际版账号会跳过「仅国内版」的任务（引擎自动处理） */}
+                        <Badge variant="outline"
+                               className={cn('w-fit text-[9px]',
+                                 CN_ONLY_TASKS.includes(s.task)
+                                   ? 'border-amber-500/40 text-amber-600 dark:text-amber-400'
+                                   : 'text-muted-foreground')}>
+                          {CN_ONLY_TASKS.includes(s.task)
+                            ? t('schedules.realmCnOnly')
+                            : t('schedules.realmBoth')}
+                        </Badge>
                       </div>
                     </TableCell>
                     <TableCell>

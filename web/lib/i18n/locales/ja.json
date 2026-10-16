@@ -2095,7 +2095,13 @@
     "task.daily_checkin": "デイリーチェックイン",
     "task.refresh_growth_tasks": "グロースタスク一覧を更新",
     "task.run_growth_tasks": "グロースタスクを自動実行",
-    "task.keepalive_tokens": "トークン keep-alive（毎時）"
+    "task.keepalive_tokens": "トークン keep-alive（毎時）",
+    "realmNote": "国際版アカウントのゲート",
+    "realmNoteDesc": "国際版（global）アカウントにはチェックイン / 成長 / 猫の旅 / 新学期 / 夜猫などの仕組みが無く、これらのタスクは自動的にスキップし「国際版アカウント N 件は該当なし」と報告します。残高更新・クレジット同期・モデル同期・トークン保持は通常どおり実行されます。",
+    "realmTagGlobal": "国際版は対象外",
+    "realmApplicable": "対象バージョン",
+    "realmBoth": "国内版 + 国際版",
+    "realmCnOnly": "国内版のみ"
   },
   "growth": {
     "title": "グロースプラン",

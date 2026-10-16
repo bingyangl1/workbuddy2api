@@ -2119,7 +2119,13 @@
     "task.daily_checkin": "Daily check-in for credits",
     "task.refresh_growth_tasks": "Refresh growth task list",
     "task.run_growth_tasks": "Auto-run growth tasks",
-    "task.keepalive_tokens": "Token keep-alive (hourly)"
+    "task.keepalive_tokens": "Token keep-alive (hourly)",
+    "realmNote": "Global-realm gating",
+    "realmNoteDesc": "Global-realm accounts have no check-in / growth / cat-travel / back-to-school / night-owl programs, so those tasks skip them automatically and report \"N global accounts have no such activity, skipped\". Balance refresh, credits sync, model sync and token keepalive run normally.",
+    "realmTagGlobal": "N/A for global",
+    "realmApplicable": "Applies to",
+    "realmBoth": "CN + Global",
+    "realmCnOnly": "CN only"
   },
   "growth": {
     "title": "Growth Plan",

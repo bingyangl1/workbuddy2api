@@ -2095,7 +2095,13 @@
     "task.daily_checkin": "일일 체크인 크레딧",
     "task.refresh_growth_tasks": "성장 작업 목록 갱신",
     "task.run_growth_tasks": "성장 작업 자동 실행",
-    "task.keepalive_tokens": "토큰 keep-alive (정각)"
+    "task.keepalive_tokens": "토큰 keep-alive (정각)",
+    "realmNote": "국제판 계정 게이팅",
+    "realmNoteDesc": "국제판(global) 계정에는 출석체크 / 성장 / 고양이 여행 / 개학 시즌 / 야간 모드 등의 체계가 없어 해당 작업은 자동으로 건너뛰고 \"국제판 계정 N개 해당 없음, 건너뜀\"으로 보고합니다. 잔액 새로고침, 크레딧 동기화, 모델 동기화, 토큰 유지는 정상 실행됩니다.",
+    "realmTagGlobal": "국제판 미적용",
+    "realmApplicable": "적용 버전",
+    "realmBoth": "국내판 + 국제판",
+    "realmCnOnly": "국내판 전용"
   },
   "growth": {
     "title": "성장 플랜",

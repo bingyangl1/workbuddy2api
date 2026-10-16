@@ -2095,7 +2095,13 @@
     "task.daily_checkin": "每日簽到領取積分",
     "task.refresh_growth_tasks": "每日更新成長任務列表",
     "task.run_growth_tasks": "每日自動做成長任務",
-    "task.keepalive_tokens": "token 保活（按整點）"
+    "task.keepalive_tokens": "token 保活（按整點）",
+    "realmNote": "國際版帳號的門控",
+    "realmNoteDesc": "國際版（global）帳號沒有簽到 / 成長 / 貓貓旅行 / 開學季 / 夜貓等體系，這些任務會自動跳過它們並在結果裡報「N 個國際版帳號無此活動已跳過」。餘額重新整理、積分同步、模型同步、Token 保活**照常執行**。",
+    "realmTagGlobal": "國際版不適用",
+    "realmApplicable": "適用版本",
+    "realmBoth": "國內版 + 國際版",
+    "realmCnOnly": "僅國內版"
   },
   "growth": {
     "title": "成長計劃",
