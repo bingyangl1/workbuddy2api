@@ -135,15 +135,34 @@ class RejectRedactedCase(unittest.TestCase):
                             {"key": "k", "value": marker, "updated_at": None}]}})
 
     # ── 防线 3：auth_json 结构损坏 ──
+    def test_rejects_auth_that_is_not_an_object(self):
+        """auth 段存在但类型不对（如被整体脱敏成字符串）→ 拒。"""
+        with self.assertRaises(ValueError) as cm:
+            self.backup.restore_snapshot(
+                self.db, _snapshot([_acc_row(auth='{"auth": "[redacted]", "account": {}}')]))
+        # 注意：这条会被防线 2（占位符）先拦到，也符合预期
+        self.assertTrue("占位符" in str(cm.exception) or "合法 JSON" in str(cm.exception))
+
+    def test_rejects_auth_that_is_a_json_scalar(self):
+        """合法 JSON 但不是对象（Engine 取 .get() 会炸）→ 拒。"""
+        with self.assertRaises(ValueError) as cm:
+            self.backup.restore_snapshot(self.db, _snapshot([_acc_row(auth='"just-a-string"')]))
+        self.assertIn("合法 JSON", str(cm.exception))
+
+    def test_simplified_auth_structure_passes(self):
+        """简化结构（合法 JSON + 对象 + 无 auth 段）**不拦** —— 它不是损坏。
+
+        实测教训：一开始要求「必须有 auth 段」，把 `tests/test_backup.py` 的
+        `test_restore_overwrites` 误拦了（它用 `{"token":"t"}` 这种简化 fixture）。
+        过度严格会让合法快照无法恢复，所以判据收窄到「明确损坏」。
+        """
+        r = self.backup.restore_snapshot(
+            self.db, _snapshot([_acc_row(auth='{"token": "t"}')]))
+        self.assertEqual(r["restored"].get("accounts"), 1)
+
     def test_rejects_broken_auth_json(self):
         with self.assertRaises(ValueError) as cm:
             self.backup.restore_snapshot(self.db, _snapshot([_acc_row(auth='{"auth": ')]))
-        self.assertIn("合法 JSON", str(cm.exception))
-
-    def test_rejects_auth_without_auth_section(self):
-        """合法 JSON 但缺 auth 段 → 上游调用必然失败，也要拒。"""
-        with self.assertRaises(ValueError) as cm:
-            self.backup.restore_snapshot(self.db, _snapshot([_acc_row(auth='{"foo": 1}')]))
         self.assertIn("合法 JSON", str(cm.exception))
 
     # ── 逃生门：显式允许时才放行（结构演示用）──
@@ -180,10 +199,14 @@ class RedactHelpersCase(unittest.TestCase):
 
     def test_find_broken_auth(self):
         from admin import backup
-        good = {"accounts": [{"auth_json": GOOD_AUTH}, {"auth_json": ""}]}
+        good = {"accounts": [{"auth_json": GOOD_AUTH}, {"auth_json": ""},
+                             {"auth_json": '{"token": "t"}'}]}   # 简化结构不算坏
         self.assertEqual(backup._find_broken_auth(good), 0)
-        bad = {"accounts": [{"auth_json": "[redacted]"}, {"auth_json": '{"x":1}'}]}
-        self.assertEqual(backup._find_broken_auth(bad), 2)
+        bad = {"accounts": [{"auth_json": "[redacted]"},            # 非 JSON
+                            {"auth_json": '"scalar"'},              # 非对象
+                            {"auth_json": '{"auth": "[redacted]"}'},  # auth 类型不对
+                            {"auth_json": '{"token": "t"}'}]}       # 这条不算
+        self.assertEqual(backup._find_broken_auth(bad), 3)
 
 
 if __name__ == "__main__":

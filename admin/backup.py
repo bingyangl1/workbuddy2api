@@ -169,10 +169,20 @@ def _find_redacted(tables: dict) -> str:
 
 
 def _find_broken_auth(tables: dict) -> int:
-    """统计快照里 auth_json 非法 JSON 的账号数（凭证结构已损坏）。
+    """统计快照里 auth_json **明确损坏**的账号数。
 
-    只检查 accounts 表、且只对「非空字符串」判定：空值可能是正常的未完成导入，
-    不是我们要拦的对象（那种情况下用「非 JSON」拦会误伤）。
+    什么算「明确损坏」（这是精心收窄过的判据）：
+      * 不是合法 JSON  → 引擎 `json.loads` 必抛（本次事故正是 `"[redacted]"`）
+      * 合法 JSON 但不是对象（如 `"abc"` / `123`）→ 取 `.get("auth")` 必炸
+      * 是对象，但**存在 auth 段且 auth 不是对象**（如 `{"auth": "[redacted]"}`）
+
+    为什么**不**要求「必须有 auth 段」：
+      * 引擎读的是 `auth.accessToken` 等，缺段会在调用时自然报错，不是静默损坏；
+      * 测试与历史数据里存在 `{"token": "t"}` 这类简化结构（合法且无害，
+        对应「尚未导入完整凭证」的占位账号）；
+      * 恢复功能应当**拦住会静默毁数据的情形**，而不是替调用方做结构强校验
+        （过度严格会让合法快照无法恢复 —— 实测：老测试
+        `test_restore_overwrites` 用的就是简化结构，被过严的判据误拦）。
     """
     broken = 0
     for row in (tables.get("accounts") or []):
@@ -180,15 +190,18 @@ def _find_broken_auth(tables: dict) -> int:
             continue
         aj = row.get("auth_json")
         if not isinstance(aj, str) or not aj.strip():
-            continue
+            continue          # 空值 = 未导入，不是损坏
         try:
             obj = json.loads(aj)
         except Exception:
-            broken += 1
+            broken += 1       # 不是 JSON（本次事故的形态）
             continue
-        # 合法 JSON 但结构不对（不是对象 / 没有 auth 段）也算坏：上游调用必然失败
-        if not isinstance(obj, dict) or not isinstance(obj.get("auth"), dict):
-            broken += 1
+        if not isinstance(obj, dict):
+            broken += 1       # 不是对象
+            continue
+        inner = obj.get("auth")
+        if "auth" in obj and not isinstance(inner, dict):
+            broken += 1       # auth 段存在但类型不对
     return broken
 
 
