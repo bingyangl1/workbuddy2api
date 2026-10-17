@@ -174,10 +174,16 @@ class MemoryLimitPerfCase(unittest.TestCase):
             elapsed = time.perf_counter() - t0
 
         rate = n / elapsed if elapsed > 0 else 0
-        # 手机端即使 10 QPS 也只用到这个数字的零头；门槛设得很宽松，
-        # 只为防止「误改成每次查库 / 加全局锁」导致的数量级退化。
+        # 门槛只用来抓**数量级退化**（比如改成每次查库或加全局锁），
+        # 不是性能基准。
+        #
+        # 实测参考：本机 ~80 万次/秒，GitHub Actions runner ~2.8 万次/秒。
+        # runner 慢一个数量级是正常的（共享 CPU、有沙箱、Python 版本不同）。
+        # 门槛设 5000 —— 比最慢的实测还低 5 倍，但比「每次都查库」
+        #（百次级/秒）高一个数量级以上。这样既能在 CI 上稳定通过，
+        # 又能抓住真正的退化。
         self.assertGreater(
-            rate, 50_000,
+            rate, 5_000,
             f"memory 限流只有 {rate:,.0f} 次/秒 —— 疑似退化"
             "（不应每次走数据库或全局锁）")
 
