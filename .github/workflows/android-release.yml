@@ -92,6 +92,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          # ⚠️ **pytest 必须显式装**：`requirements.txt` 里没有它（那是运行
+          # 依赖，不是测试依赖）。少了它，后面「产物验证」步骤会报
+          #     No module named pytest
+          # 而不是真的验证产物 —— 一个「看起来在验证、其实什么都没验」的
+          # 假通过。CI 实测踩过。
+          python -m pip install pytest
 
       # ⚠️ 顺序：**先构建面板，再跑启动自检**。
       #
