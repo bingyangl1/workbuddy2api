@@ -397,7 +397,9 @@ cd web && NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel npm run build   # �
 
 ### 3.3 技术栈
 
-- 后端：**FastAPI + SQLAlchemy 2.0 + MySQL 8（pymysql）+ Redis**
+- 后端：**FastAPI + SQLAlchemy 2.0 + MySQL 8（pymysql）/ SQLite + Redis（可选）**
+  - 数据库**二选一**：MySQL（多实例 / 大账号池）或 SQLite（**零外部依赖**，PC / 安卓端推荐）
+  - Redis **可选**：只用于网关限流；设 `ADMIN_GATEWAY_LIMIT_BACKEND=memory` 即可不装
 - 前端：**纯 HTML + TailwindCSS + FontAwesome**（CDN，无需构建），单页管理后台
 - 鉴权：后台 JWT（HS256）；代理 API Key 用 SHA-256 存储，明文仅创建时展示一次
 
@@ -857,9 +859,37 @@ xx 个账号最坏能占住调度线程一个多小时，期间整点刷新 / �
 |------|------|------|
 | Python | 运行 converter / admin | 3.10+（推荐 3.12） |
 | Node.js | 设备风控头 `turing_helper.js`（require 桌面端 SDK） | 任意 LTS |
-| MySQL | admin 账号池 / 用量库 | 8.x，默认 `root/root`，库名 `workbuddy_admin` |
-| Redis | admin Key / 配额缓存 | 默认 6379 |
+| **数据库（二选一）** | admin 账号池 / 用量库 | 见下 |
+| ├ MySQL | 多实例 / 大账号池 | 8.x，默认 `root/root`，库名 `workbuddy_admin` |
+| └ SQLite | **PC / 安卓 / 单机 docker**（零外部依赖） | 内置，无需安装 |
+| **Redis（可选）** | 网关限流（`memory` 后端可替代） | 默认 6379 |
 | WorkBuddy 桌面端 | 提供登录态 `.info` 与 Turing SDK | 已登录 |
+
+#### 数据库怎么选
+
+```bash
+# MySQL（多实例、或账号数量很大）
+ADMIN_DATABASE_URL=mysql+pymysql://root:root@127.0.0.1:3306/workbuddy_admin?charset=utf8mb4
+
+# SQLite（不装 MySQL，不需要任何外部组件）
+ADMIN_DATABASE_URL=sqlite:///F:/wb2api/data/workbuddy.db     # Windows
+ADMIN_DATABASE_URL=sqlite:////opt/workbuddy/data/workbuddy.db # Linux（注意 4 个斜杠）
+```
+
+SQLite 下已自动启用 `WAL` + `busy_timeout=30s`，并会**自动创建数据库文件的父目录**。
+首次启动只跑一条命令即可，不用先建库建表。
+
+> **多副本部署必须用 MySQL** —— SQLite 是单文件，多个实例共享会互相锁死。
+
+#### Redis 要不要装
+
+```bash
+ADMIN_GATEWAY_LIMIT_BACKEND=memory   # 单机推荐：不装 Redis
+ADMIN_GATEWAY_LIMIT_BACKEND=redis    # 强制用 Redis（连不上直接报错退出）
+ADMIN_GATEWAY_LIMIT_BACKEND=auto     # 默认：能连就用，连不上自动降级到内存
+```
+
+多实例部署需要 Redis —— 否则各实例的限流计数不共享，等于限流被放大 N 倍。
 
 > 本项目自带 managed 隔离环境：`C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\python.exe`（已装全部依赖）。`main.py` 启动时会自动检测到缺包并切换过去。
 

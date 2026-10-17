@@ -25,6 +25,50 @@ def _quote_db_name(name: str) -> str:
     """库名（来自配置）去除反引号转义后安全引用。"""
     return name.replace("`", "").replace("\\", "").strip()
 
+def _sqlite_ensure_parent_dir(url: str) -> None:
+    """SQLite 数据库文件的父目录不存在时**自动创建**。
+
+    ## 为什么必须先做这一步
+
+    SQLite 不会自己建目录。`sqlite:///F:/wb2api/data/workbuddy.db` 在
+    `data/` 不存在时，连接阶段直接抛
+    `sqlite3.OperationalError: unable to open database file`。
+
+    这个报错**完全不提目录**，看起来像权限问题或 SQLAlchemy 配置错，
+    排查成本很高。而 PC / 安卓端应用正是「用户随便选个路径」的场景 ——
+    父目录大概率不存在。
+
+    ## 只处理文件路径
+
+    `sqlite:///:memory:`（内存库）与 `sqlite://`（无名内存库）没有文件，
+    跳过；测试与临时场景常用它们。
+    """
+    import os as _os
+    import re as _re
+
+    # 取 "sqlite:///" 之后的部分
+    m = _re.match(r"^sqlite:///(.*)$", url)
+    if not m:
+        return
+    path = m.group(1)
+    # 去掉 query（如 ?cache=shared&uri=true）
+    path = path.split("?", 1)[0]
+    if not path or path.startswith(":memory:"):
+        return
+    # 4 个斜杠的形式（Linux 绝对路径）在 match 后剩 "/opt/..."，
+    # 上面已正确保留前导斜杠；Windows 绝对路径形如 "F:/dir/x.db"。
+    parent = _os.path.dirname(path)
+    if parent and not _os.path.isdir(parent):
+        try:
+            _os.makedirs(parent, exist_ok=True)
+            logger.info("已创建 SQLite 数据目录：%s", parent)
+        except OSError as e:      # 权限/磁盘问题：交给后面的连接阶段报明细
+            logger.warning("创建 SQLite 数据目录失败（%s）：%s", parent, e)
+
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    _sqlite_ensure_parent_dir(settings.DATABASE_URL)
+
 engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=3600,
                         pool_timeout=30, pool_size=20, max_overflow=40, future=True)
 if engine.dialect.name == "sqlite":
