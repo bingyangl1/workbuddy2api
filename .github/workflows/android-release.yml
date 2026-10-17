@@ -112,43 +112,30 @@ jobs:
           # 面板要打进 APK，必须用静态导出
           NEXT_TELEMETRY_DISABLED: '1'
 
-      - name: Restore or generate signing keystore
-        id: signing
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          set -euo pipefail
-          mkdir -p build/android-signing
-          if [ -n "${KEYSTORE_B64:-}" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > build/android-signing/release.jks
-            echo "using=secrets" >> "$GITHUB_OUTPUT"
-          elif [ -f build/android-signing/release.jks ]; then
-            echo "using=cached" >> "$GITHUB_OUTPUT"
-          else
-            # 首次：生成一个密钥。**必须缓存**，否则下次版本无法覆盖安装。
-            keytool -genkeypair -v \
-              -keystore build/android-signing/release.jks \
-              -alias workbuddy2api -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass "${{ github.run_id }}-wb2api" \
-              -keypass "${{ github.run_id }}-wb2api" \
-              -dname "CN=WorkBuddy2API, OU=Self-hosted, O=WorkBuddy2API, C=CN"
-            echo "using=generated" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Restore signing cache
-        if: steps.signing.outputs.using == 'generated'
-        uses: actions/cache/save@v4
-        with:
-          path: build/android-signing
-          key: android-signing-${{ github.repository }}-${{ github.run_id }}
-
-      - name: Restore previous signing cache
-        id: signcache
+      # ⚠️ 顺序很重要：**先 restore，再决定要不要生成**。
+      #
+      # 早先写成「先判断有没有 → 没有就生成 → 再 save」，但那时 cache 还没
+      # restore 过，即使仓库里已有缓存也会走「生成新密钥」分支 ——
+      # 于是每次发版都换密钥，**用户无法覆盖升级**（Android 要求同签名）。
+      # ## 签名密钥
+      #
+      # `scripts/build_android.py` 自己管理签名身份：
+      #   * `build/android-signing/signing.json` 存密码
+      #   * `build/android-signing/release.jks`  存密钥
+      #   * 两者不存在时自动 `keytool -genkeypair` 生成
+      #
+      # 所以 CI 这边**只需把整个目录缓存起来**，不要重复实现生成逻辑
+      #（早先我在这里手写 keytool，与脚本的密码来源打架 —— 已去掉）。
+      #
+      # ⚠️ 顺序：**先 restore 再构建**。否则每次发版都重新生成密钥，
+      # 用户无法覆盖升级（Android 要求同签名）。
+      - name: Restore signing identity
         uses: actions/cache/restore@v4
         with:
           path: build/android-signing
           key: android-signing-${{ github.repository }}
-          restore-keys: android-signing-${{ github.repository }}
+          restore-keys: |
+            android-signing-${{ github.repository }}
 
       - name: Build APK
         run: |
@@ -156,6 +143,13 @@ jobs:
             --gradle "$(which gradle)" \
             --jdk "$JAVA_HOME" \
             --sdk "$ANDROID_HOME"
+
+      # 构建后（首次会自动生成密钥）保存，供下次覆盖升级使用
+      - name: Save signing identity
+        uses: actions/cache/save@v4
+        with:
+          path: build/android-signing
+          key: android-signing-${{ github.repository }}
 
       - name: Compute checksum
         run: |
