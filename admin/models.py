@@ -1,7 +1,8 @@
 """ORM 模型：账号、API Key、用量日志。"""
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import (Column, DateTime, Float, Index, Integer, String, Text,
+                        UniqueConstraint)
 
 from admin.db import Base
 
@@ -401,3 +402,54 @@ class Schedule(Base):
     stop_after = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BenefitClaim(Base):
+    """限时权益 / 补偿的领取记录（**每账号每期一条**）。
+
+    ## 为什么要有这张表
+
+    上游的权益活动是「每账号只能领一次」，而且**多领会被判异常**
+    （用户明确要求：「有些是只能跑一遍的，多遍跑会检测的」）。
+    光靠内存状态挡不住：重启进程、多进程、连点两下都能绕过。
+
+    `(account_id, campaign_key)` 上的唯一约束才是真正的互斥 ——
+    并发插入时只有一个能成功，其余拿到 `IntegrityError`。
+
+    ## campaign_key 的含义
+
+    活动期标识。**换期必须换 key**，否则上一期的「已领取」会挡住新一期。
+    当前值见 `admin/benefits.CAMPAIGN_KEY`。
+
+    ## 字段语义（`claimed` 与 `credit` 的配合）
+
+    | 场景 | claimed | credit | 说明 |
+    |---|---|---|---|
+    | 只查过，不可领 | 0 | 0 | `last_reason` 记原因 |
+    | 领取请求发出但失败 | 0 | 0 | **不置 claimed**，允许用户重试 |
+    | 领取成功 | 1 | N | `claimed_at` 记录时间，永久挡住重复领取 |
+
+    注意「领取失败不置 claimed」是有意为之：否则一次网络抖动会让这个账号
+    永久失去领取机会。
+    """
+
+    __tablename__ = "benefit_claims"
+    __table_args__ = (
+        # 真正的互斥来源：同一账号同一期只能有一行
+        UniqueConstraint("account_id", "campaign_key",
+                         name="uq_benefit_claims_account_campaign"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, nullable=False, index=True)
+    campaign_key = Column(String(64), nullable=False, default="")
+    claimed = Column(Integer, default=0)          # 0/1
+    credit = Column(Integer, default=0)           # 成功领取的积分数
+    claimed_at = Column(DateTime, nullable=True)
+    checked_at = Column(DateTime, nullable=True)  # 上次查询时间
+    last_reason = Column(String(500), default="")
+    last_http = Column(Integer, default=0)
+    last_code = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)

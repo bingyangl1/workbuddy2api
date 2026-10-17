@@ -70,7 +70,8 @@
     "growth": "Growth",
     "audit": "Audit log",
     "accountGroups": "Account groups",
-    "layout": "Layout"
+    "layout": "Layout",
+    "benefits": "Benefits"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy account pool console · OpenAI-compatible gateway",
@@ -2154,19 +2155,21 @@
     "deleteTitle": "Delete job",
     "deleteConfirm": "Delete job \"{name}\"?",
     "delete": "Delete",
-    "task.refresh_balances": "Refresh total balance",
-    "task.refresh_credits": "Update credit expiry snapshot",
-    "task.sync_models": "Sync model list",
-    "task.daily_checkin": "Daily check-in for credits",
-    "task.refresh_growth_tasks": "Refresh growth task list",
-    "task.run_growth_tasks": "Auto-run growth tasks",
-    "task.keepalive_tokens": "Token keep-alive (hourly)",
     "realmNote": "Global-realm gating",
     "realmNoteDesc": "Global-realm accounts have no check-in / growth / cat-travel / back-to-school / night-owl programs, so those tasks skip them automatically and report \"N global accounts have no such activity, skipped\". Balance refresh, credits sync, model sync and token keepalive run normally.",
     "realmTagGlobal": "N/A for global",
     "realmApplicable": "Applies to",
     "realmBoth": "CN + Global",
-    "realmCnOnly": "CN only"
+    "realmCnOnly": "CN only",
+    "task": {
+      "refresh_balances": "Refresh total balance",
+      "refresh_credits": "Update credit expiry snapshot",
+      "sync_models": "Sync model list",
+      "daily_checkin": "Daily check-in for credits",
+      "refresh_growth_tasks": "Refresh growth task list",
+      "run_growth_tasks": "Auto-run growth tasks",
+      "keepalive_tokens": "Token keep-alive (hourly)"
+    }
   },
   "growth": {
     "title": "Growth Plan",
@@ -2347,5 +2350,44 @@
     "toggleVisible": "Show/hide {name}",
     "unsaved": "You have unsaved changes — click Save at the top right.",
     "locked": "Always visible"
+  },
+  "benefits": {
+    "title": "Time-limited benefits",
+    "subtitle": "Query and claim available benefits and compensation (manual run)",
+    "manualOnly": "Manual run only:",
+    "manualOnlyHint": "This feature is not part of any scheduled task. The upstream detects repeated claims, so nothing is sent until you confirm.",
+    "accountsChecked": "Accounts checked",
+    "accountsClaimed": "Accounts claimed",
+    "creditsClaimed": "Credits claimed",
+    "refresh": "Refresh",
+    "query": "Check availability",
+    "querying": "Checking…",
+    "queryHint": "Ask the upstream whether these accounts can claim now (read-only, safe to repeat)",
+    "claim": "Claim",
+    "claiming": "Claiming…",
+    "selected": "{n} selected",
+    "selectAll": "Select all",
+    "account": "Account",
+    "realm": "Edition",
+    "realmCn": "China",
+    "realmGlobal": "Global",
+    "status": "Status",
+    "detail": "Detail",
+    "claimedAt": "Claimed at",
+    "empty": "No active accounts",
+    "confirmTitle": "Confirm claim",
+    "confirmBody": "A claim request will be sent for {n} account(s).",
+    "confirmIrreversible": "Claiming is a write operation and cannot be undone. Each account can claim once per campaign; repeats may be flagged as anomalous.",
+    "cancel": "Cancel",
+    "confirmYes": "Claim now",
+    "st": {
+      "available": "Available",
+      "already": "Already claimed",
+      "claimed": "Claimed",
+      "expired": "Expired",
+      "ineligible": "Not eligible",
+      "unknown": "Unknown",
+      "error": "Check failed"
+    }
   }
 }

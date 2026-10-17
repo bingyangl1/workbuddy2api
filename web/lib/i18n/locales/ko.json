@@ -70,7 +70,8 @@
     "growth": "성장 플랜",
     "audit": "감사 로그",
     "accountGroups": "계정 그룹",
-    "layout": "레이아웃"
+    "layout": "레이아웃",
+    "benefits": "기간 한정 혜택"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy 계정 풀 관리 · OpenAI 호환 리버스 프록시 게이트웨이",
@@ -2130,19 +2131,21 @@
     "deleteTitle": "작업 삭제",
     "deleteConfirm": "작업 \"{name}\"을(를) 삭제하시겠습니까?",
     "delete": "삭제",
-    "task.refresh_balances": "총 잔액 새로고침",
-    "task.refresh_credits": "크레딧 만료 스냅샷 갱신",
-    "task.sync_models": "모델 목록 동기화",
-    "task.daily_checkin": "일일 체크인 크레딧",
-    "task.refresh_growth_tasks": "성장 작업 목록 갱신",
-    "task.run_growth_tasks": "성장 작업 자동 실행",
-    "task.keepalive_tokens": "토큰 keep-alive (정각)",
     "realmNote": "국제판 계정 게이팅",
     "realmNoteDesc": "국제판(global) 계정에는 출석체크 / 성장 / 고양이 여행 / 개학 시즌 / 야간 모드 등의 체계가 없어 해당 작업은 자동으로 건너뛰고 \"국제판 계정 N개 해당 없음, 건너뜀\"으로 보고합니다. 잔액 새로고침, 크레딧 동기화, 모델 동기화, 토큰 유지는 정상 실행됩니다.",
     "realmTagGlobal": "국제판 미적용",
     "realmApplicable": "적용 버전",
     "realmBoth": "국내판 + 국제판",
-    "realmCnOnly": "국내판 전용"
+    "realmCnOnly": "국내판 전용",
+    "task": {
+      "refresh_balances": "총 잔액 새로고침",
+      "refresh_credits": "크레딧 만료 스냅샷 갱신",
+      "sync_models": "모델 목록 동기화",
+      "daily_checkin": "일일 체크인 크레딧",
+      "refresh_growth_tasks": "성장 작업 목록 갱신",
+      "run_growth_tasks": "성장 작업 자동 실행",
+      "keepalive_tokens": "토큰 keep-alive (정각)"
+    }
   },
   "growth": {
     "title": "성장 플랜",
@@ -2323,5 +2326,44 @@
     "toggleVisible": "{name} 표시/숨김",
     "unsaved": "저장되지 않은 변경이 있습니다. 오른쪽 위 «저장»을 누르세요.",
     "locked": "숨김 불가"
+  },
+  "benefits": {
+    "title": "기간 한정 혜택",
+    "subtitle": "계정의 기간 한정 혜택과 보상을 확인하고 수령합니다(수동 실행)",
+    "manualOnly": "수동 실행 전용:",
+    "manualOnlyHint": "이 기능은 정기 작업에 포함되지 않습니다. 상류는 중복 수령을 감지하므로 확인하기 전에는 요청을 보내지 않습니다.",
+    "accountsChecked": "확인한 계정",
+    "accountsClaimed": "수령한 계정",
+    "creditsClaimed": "수령 크레딧",
+    "refresh": "새로고침",
+    "query": "수령 가능 확인",
+    "querying": "확인 중…",
+    "queryHint": "상류에 수령 가능 여부를 조회합니다(읽기 전용, 반복 가능)",
+    "claim": "수령",
+    "claiming": "수령 중…",
+    "selected": "{n}개 선택",
+    "selectAll": "전체 선택",
+    "account": "계정",
+    "realm": "버전",
+    "realmCn": "중국판",
+    "realmGlobal": "글로벌판",
+    "status": "상태",
+    "detail": "상세",
+    "claimedAt": "수령 시각",
+    "empty": "사용 가능한 계정이 없습니다",
+    "confirmTitle": "수령 확인",
+    "confirmBody": "{n}개 계정에 수령 요청을 보냅니다.",
+    "confirmIrreversible": "수령은 쓰기 작업이며 되돌릴 수 없습니다. 계정당 기간별 1회만 가능하며 중복은 비정상으로 판정될 수 있습니다.",
+    "cancel": "취소",
+    "confirmYes": "수령",
+    "st": {
+      "available": "수령 가능",
+      "already": "수령 완료",
+      "claimed": "수령 완료",
+      "expired": "기한 만료",
+      "ineligible": "대상 아님",
+      "unknown": "알 수 없음",
+      "error": "확인 실패"
+    }
   }
 }

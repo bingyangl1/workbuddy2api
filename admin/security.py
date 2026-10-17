@@ -100,6 +100,10 @@ _UPSTREAM_WRITE_ROUTES = (
     "/api/models/sync",                  # 从上游同步模型列表
     "/api/models/speed-test",            # 真实流式请求测速（占账号）
     "/api/playground/chat",              # 测试台直调（真实消耗积分，走号池选号）
+    # 限时权益：**领取**是写操作且不可回滚（上游每账号只能领一次，多领会被判
+    # 异常）。测试/截图核验时绝不能误触，所以纳入护栏。
+    # 注意只列 `/claim`，**不列 `/query`** —— 查询是只读的，测试期应当允许。
+    "/api/benefits/claim",
 )
 #: accounts 下带 id 的上游写：/{id}/refresh、/{id}/inject、/{id}/cat-travel
 _UPSTREAM_WRITE_ACCOUNT_SUB = ("/refresh", "/inject", "/cat-travel")

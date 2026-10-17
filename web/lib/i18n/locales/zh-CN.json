@@ -70,7 +70,8 @@
     "growth": "成长计划",
     "audit": "操作审计",
     "accountGroups": "账号分组",
-    "layout": "界面布局"
+    "layout": "界面布局",
+    "benefits": "限时权益"
   },
   "login": {
     "subtitle": "腾讯 CodeBuddy 账号池管理 · OpenAI 兼容反代网关",
@@ -1921,19 +1922,21 @@
     "deleteTitle": "删除任务",
     "deleteConfirm": "确定删除任务「{name}」吗？",
     "delete": "删除",
-    "task.refresh_balances": "刷新平台总积分",
-    "task.refresh_credits": "更新积分到期快照",
-    "task.sync_models": "同步模型列表",
-    "task.daily_checkin": "每日签到领取积分",
-    "task.refresh_growth_tasks": "每日更新成长任务列表",
-    "task.run_growth_tasks": "每日自动做成长任务",
-    "task.keepalive_tokens": "token 保活（按整点）",
     "realmNote": "国际版账号的门控",
     "realmNoteDesc": "国际版（global）账号没有签到 / 成长 / 猫猫旅行 / 开学季 / 夜猫等体系，这些任务会自动跳过它们并在结果里报「N 个国际版账号无此活动已跳过」。余额刷新、积分同步、模型同步、Token 保活**照常执行**。",
     "realmTagGlobal": "国际版不适用",
     "realmApplicable": "适用版本",
     "realmBoth": "国内版 + 国际版",
-    "realmCnOnly": "仅国内版"
+    "realmCnOnly": "仅国内版",
+    "task": {
+      "refresh_balances": "刷新平台总积分",
+      "refresh_credits": "更新积分到期快照",
+      "sync_models": "同步模型列表",
+      "daily_checkin": "每日签到领取积分",
+      "refresh_growth_tasks": "每日更新成长任务列表",
+      "run_growth_tasks": "每日自动做成长任务",
+      "keepalive_tokens": "token 保活（按整点）"
+    }
   },
   "growth": {
     "title": "成长计划",
@@ -2114,5 +2117,44 @@
     "toggleVisible": "显示/隐藏 {name}",
     "unsaved": "有未保存的改动，点右上角「保存」生效。",
     "locked": "不可隐藏"
+  },
+  "benefits": {
+    "title": "限时权益",
+    "subtitle": "查询并领取账号可用的限时权益与补偿（手动运行）",
+    "manualOnly": "只能手动运行：",
+    "manualOnlyHint": "本功能不参与任何定时任务。上游对重复领取有检测，所以必须由你确认后再发请求。",
+    "accountsChecked": "已查询账号",
+    "accountsClaimed": "已领取账号",
+    "creditsClaimed": "已领积分",
+    "refresh": "刷新列表",
+    "query": "查询可领",
+    "querying": "查询中…",
+    "queryHint": "向上游查询这些账号当前能不能领（只读，可反复点）",
+    "claim": "领取",
+    "claiming": "领取中…",
+    "selected": "已选 {n} 个",
+    "selectAll": "全选",
+    "account": "账号",
+    "realm": "版本",
+    "realmCn": "国内版",
+    "realmGlobal": "国际版",
+    "status": "状态",
+    "detail": "详情",
+    "claimedAt": "领取于",
+    "empty": "没有可用账号",
+    "confirmTitle": "确认领取",
+    "confirmBody": "将为 {n} 个账号发起领取请求。",
+    "confirmIrreversible": "领取是写操作且不可回滚。每账号每期只能领一次，重复领取可能被上游判定为异常。",
+    "cancel": "取消",
+    "confirmYes": "确认领取",
+    "st": {
+      "available": "可领取",
+      "already": "已领取",
+      "claimed": "已领取",
+      "expired": "已截止",
+      "ineligible": "无资格",
+      "unknown": "状态不明",
+      "error": "查询失败"
+    }
   }
 }

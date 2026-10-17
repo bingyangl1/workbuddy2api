@@ -40,6 +40,7 @@ export type NavIconKey =
   | 'credits'
   | 'schedules'
   | 'growth'
+  | 'benefits'
   | 'security'
   | 'audit'
   | 'accountGroups'
@@ -128,6 +129,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       {href: '/schedules', labelKey: 'nav.schedules', iconKey: 'schedules'},
       {href: '/growth', labelKey: 'nav.growth', iconKey: 'growth'},
+      // 限时权益：**刻意与 schedules 分开描述** —— 它不属于定时任务，
+      // 只能手动跑（上游对重复领取有检测）。
+      {href: '/benefits', labelKey: 'nav.benefits', iconKey: 'benefits'},
     ],
   },
   {

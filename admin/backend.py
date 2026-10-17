@@ -1164,6 +1164,111 @@ class AccountSession:
                 break
         return out
 
+    # ── 限时权益 / 补偿（官方 billing 端点）──────────────────────────
+    #
+    # 协议来自上游（我们的 fork 上游 xiaofan6ya/workbuddy2api）：
+    #
+    #     POST /billing/meter/compensation-status    查当前权益
+    #     POST /billing/meter/claim-compensation      领取
+    #
+    # 两个端点**空 JSON 请求体**，走 billing 域。
+    #
+    # ⚠️ 上游用 `WEB_BASE`（= `www.workbuddy.cn`，写死国内版），
+    # 而我们有两个 realm —— 这里必须用 `self._billing_base()`。
+    # 这正是我们前面审计修过的同一类问题（国际版凭证打国内域名）。
+    #
+    # ⚠️ 兼容性：`/billing/*` 与 `/v2/billing/*` 两种前缀在历史上都出现过
+    # （见 `realm_mod.billing_paths`），所以两个都试，404/405 才换下一个。
+
+    #: 权益相关端点（相对 billing 基址）。`{suffix}` 由 operation 决定。
+    _COMPENSATION_PATHS = {
+        "status": "billing/meter/compensation-status",
+        "claim": "billing/meter/claim-compensation",
+    }
+
+    def _compensation_request(self, operation: str) -> dict:
+        """查询 / 领取限时权益。
+
+        返回 `{"ok", "http", "code", "data"}`：
+
+            ok    = HTTP 200 且业务 code == 0
+            data  = {active, claimed, credit_num, validity_period, end_time}
+
+        `data` **只保留标量字段类型**（str/int/float/bool/None）——
+        上游的响应里可能夹带嵌套结构，全部透传会让前端/存储层拿到不可信的
+        形状；而且 `credit_num` 必须是 int，否则「金额不明确」处理会失效。
+        """
+        suffix = self._COMPENSATION_PATHS.get(operation)
+        if suffix is None:
+            return {"ok": False, "http": 0, "code": None, "data": {}}
+        base = self._billing_base().rstrip("/")
+        # 前缀候选：CN 现状 /v2 优先，Global 无前缀优先（与 billing_paths 同方向）
+        try:
+            from admin import realm as realm_mod
+            cands = realm_mod.billing_paths(self.realm, "user-resource")
+        except Exception:      # noqa: BLE001
+            cands = [f"/v2/{suffix}", f"/{suffix}"]
+        # 把 user-resource 的路径尾段换成补偿端点（复用同一套前缀方向判定）
+        urls: list[str] = []
+        for c in cands:
+            head = str(c).rsplit("/meter/", 1)[0]      # 形如 /v2/billing 或 /billing
+            urls.append(base + head + "/meter/" + suffix.rsplit("/", 1)[-1])
+        if not urls:
+            urls = [base + "/" + suffix]
+
+        headers = self._chat_headers()
+        # 官方网页在 profile/plans-usage 页面上发起这两个请求；
+        # 带上 Origin/Referer 与浏览器行为一致（billing 域头族）。
+        try:
+            wb = self._web_base()
+        except Exception:      # noqa: BLE001
+            wb = ""
+        if wb:
+            headers["Origin"] = wb
+            headers["Referer"] = wb + "/profile/plans-usage?action=addon"
+
+        last: dict = {"ok": False, "http": 0, "code": None, "data": {}}
+        for url in urls:
+            try:
+                with httpx.Client(timeout=20, limits=HTTP_LIMITS) as c:
+                    r = c.post(url, headers=headers, json={})
+            except Exception as e:      # noqa: BLE001
+                last = {"ok": False, "http": 0, "code": None, "data": {},
+                        "msg": f"网络失败: {e}"}
+                continue
+            # 前缀不对时上游给 404/405 —— 换下一个候选
+            if r.status_code in (404, 405):
+                last = {"ok": False, "http": r.status_code, "code": None, "data": {}}
+                continue
+            try:
+                payload = r.json()
+            except ValueError:
+                last = {"ok": False, "http": r.status_code, "code": None, "data": {}}
+                continue
+            if not isinstance(payload, dict):
+                last = {"ok": False, "http": r.status_code, "code": None, "data": {}}
+                continue
+            data = payload.get("data")
+            safe = {
+                k: data[k] for k in
+                ("active", "claimed", "credit_num", "validity_period", "end_time")
+                if isinstance(data, dict) and k in data
+                and isinstance(data[k], (str, int, float, bool, type(None)))
+            }
+            code = payload.get("code")
+            code = code if type(code) is int else None
+            return {"ok": r.status_code == 200 and code == 0,
+                    "http": r.status_code, "code": code, "data": safe}
+        return last
+
+    def compensation_status(self) -> dict:
+        """查当前账号的可领取权益（**只读**，不改变任何状态）。"""
+        return self._compensation_request("status")
+
+    def claim_compensation(self) -> dict:
+        """领取权益（**写操作**：会改变上游账号状态，不可回滚）。"""
+        return self._compensation_request("claim")
+
     def fetch_appearance_themes(self, keyword: str = "和平精英") -> list[dict]:
         """真实外观主题资源（走 billing 域）。
 

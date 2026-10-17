@@ -70,7 +70,8 @@
     "growth": "成長計畫",
     "audit": "操作稽核",
     "accountGroups": "帳號分組",
-    "layout": "介面佈局"
+    "layout": "介面佈局",
+    "benefits": "限時權益"
   },
   "login": {
     "subtitle": "騰訊 CodeBuddy 帳號池管理 · OpenAI 相容反向代理閘道",
@@ -2130,19 +2131,21 @@
     "deleteTitle": "刪除任務",
     "deleteConfirm": "確定刪除任務「{name}」嗎？",
     "delete": "刪除",
-    "task.refresh_balances": "刷新平台總積分",
-    "task.refresh_credits": "更新積分到期快照",
-    "task.sync_models": "同步模型列表",
-    "task.daily_checkin": "每日簽到領取積分",
-    "task.refresh_growth_tasks": "每日更新成長任務列表",
-    "task.run_growth_tasks": "每日自動做成長任務",
-    "task.keepalive_tokens": "token 保活（按整點）",
     "realmNote": "國際版帳號的門控",
     "realmNoteDesc": "國際版（global）帳號沒有簽到 / 成長 / 貓貓旅行 / 開學季 / 夜貓等體系，這些任務會自動跳過它們並在結果裡報「N 個國際版帳號無此活動已跳過」。餘額重新整理、積分同步、模型同步、Token 保活**照常執行**。",
     "realmTagGlobal": "國際版不適用",
     "realmApplicable": "適用版本",
     "realmBoth": "國內版 + 國際版",
-    "realmCnOnly": "僅國內版"
+    "realmCnOnly": "僅國內版",
+    "task": {
+      "refresh_balances": "刷新平台總積分",
+      "refresh_credits": "更新積分到期快照",
+      "sync_models": "同步模型列表",
+      "daily_checkin": "每日簽到領取積分",
+      "refresh_growth_tasks": "每日更新成長任務列表",
+      "run_growth_tasks": "每日自動做成長任務",
+      "keepalive_tokens": "token 保活（按整點）"
+    }
   },
   "growth": {
     "title": "成長計劃",
@@ -2323,5 +2326,44 @@
     "toggleVisible": "顯示/隱藏 {name}",
     "unsaved": "有未儲存的變更，點右上角「儲存」生效。",
     "locked": "不可隱藏"
+  },
+  "benefits": {
+    "title": "限時權益",
+    "subtitle": "查詢並領取帳號可用的限時權益與補償（手動執行）",
+    "manualOnly": "只能手動執行：",
+    "manualOnlyHint": "本功能不參與任何定時任務。上游對重複領取有偵測，所以必須由你確認後再發請求。",
+    "accountsChecked": "已查詢帳號",
+    "accountsClaimed": "已領取帳號",
+    "creditsClaimed": "已領積分",
+    "refresh": "重新整理",
+    "query": "查詢可領",
+    "querying": "查詢中…",
+    "queryHint": "向上游查詢這些帳號目前能不能領（唯讀，可反覆點）",
+    "claim": "領取",
+    "claiming": "領取中…",
+    "selected": "已選 {n} 個",
+    "selectAll": "全選",
+    "account": "帳號",
+    "realm": "版本",
+    "realmCn": "國內版",
+    "realmGlobal": "國際版",
+    "status": "狀態",
+    "detail": "詳情",
+    "claimedAt": "領取於",
+    "empty": "沒有可用帳號",
+    "confirmTitle": "確認領取",
+    "confirmBody": "將為 {n} 個帳號發起領取請求。",
+    "confirmIrreversible": "領取是寫入操作且不可回復。每帳號每期只能領一次，重複領取可能被上游判定為異常。",
+    "cancel": "取消",
+    "confirmYes": "確認領取",
+    "st": {
+      "available": "可領取",
+      "already": "已領取",
+      "claimed": "已領取",
+      "expired": "已截止",
+      "ineligible": "無資格",
+      "unknown": "狀態不明",
+      "error": "查詢失敗"
+    }
   }
 }

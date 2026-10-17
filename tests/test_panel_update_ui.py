@@ -293,6 +293,37 @@ class I18nCase(unittest.TestCase):
             empty = [k for k, v in d.items() if not str(v).strip()]
             self.assertEqual(empty, [], f"{loc} 有空文案：{empty}")
 
+    def test_no_dotted_flat_keys(self):
+        """**不许有带 `.` 的扁平 key**（通用缺陷）。
+
+        `lib/i18n/index.ts` 的 `lookup()` 会按 `.` **逐层下钻**，所以
+        `{"st.unknown": "状态不明"}` 这种扁平 key 永远匹配不到 ——
+        界面上会直接显示原始 key 名（实测截图里就是 `benefits.st.unknown`）。
+
+        **例外 `phrases` 分组**：它用的是「整句原文当 key」的翻译表
+        （中文原句里天然带 `.`、`:`、`/`），走的是精确匹配而不是点号下钻，
+        所以不适用这条规则。查代码可证：`t()` 对 phrases 是按整串取的。
+        """
+        locales_dir = WEB / "lib" / "i18n" / "locales"
+        for loc in self.LOCALES:
+            data = json.loads((locales_dir / f"{loc}.json").read_text(encoding="utf-8"))
+            bad = []
+
+            def walk(node, path=""):
+                if isinstance(node, dict):
+                    for k, v in node.items():
+                        # phrases 是「整句当 key」，不参与点号下钻
+                        if path.split(".")[0] == "phrases":
+                            continue
+                        if "." in k:
+                            bad.append(f"{path}.{k}" if path else k)
+                        if isinstance(v, dict):
+                            walk(v, f"{path}.{k}" if path else k)
+
+            walk(data)
+            self.assertEqual(bad, [],
+                             f"{loc} 有带点的扁平 key（会被 lookup 逐层拆开而失效）：{bad}")
+
 
 if __name__ == "__main__":
     unittest.main()

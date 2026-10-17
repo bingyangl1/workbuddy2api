@@ -604,6 +604,59 @@ export interface ClientProfile {
   defaults?: Record<string, unknown>;
 }
 
+/* ── 限时权益 / 补偿（admin/routers/benefits.py）───────────────── */
+
+/** 单个账号的权益状态。 */
+export interface BenefitAccountState {
+  account_id: number;
+  uid: string;
+  nickname: string;
+  realm: string;
+  /** available 可领 / already 已领 / expired 已截止 / ineligible 无资格 /
+   *  unknown 状态不明 / error 查询失败 / claimed 刚领取成功 */
+  status: string;
+  ok: boolean;
+  /** 本次可领（或已领）的积分数；不可领时为 0 */
+  credit: number;
+  reason: string;
+  claimed_at?: string | null;
+  claim_credit?: number;
+  checked_at?: string | null;
+  last_http?: number;
+  last_code?: number | null;
+}
+
+/** 本期活动信息。`scheduled` 恒为 false —— 本功能**只能手动跑**。 */
+export interface BenefitCampaign {
+  campaign_key: string;
+  title: string;
+  scheduled: boolean;
+  note: string;
+  statuses: string[];
+  accounts_checked: number;
+  accounts_claimed: number;
+  credits_claimed: number;
+}
+
+export interface BenefitStatusResponse {
+  campaign_key: string;
+  title: string;
+  scheduled: boolean;
+  accounts: BenefitAccountState[];
+}
+
+export interface BenefitQueryResponse {
+  ok: boolean;
+  results: BenefitAccountState[];
+}
+
+export interface BenefitClaimResponse {
+  ok: boolean;
+  claimed_count: number;
+  credits: number;
+  results: BenefitAccountState[];
+}
+
 /* ── 系统（server.py + routers/releases.py）────────────────────── */
 export interface VersionInfo {
   version: string;

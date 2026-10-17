@@ -16,6 +16,11 @@ import type {
   ApiKey,
   ApiToken,
   AuditLog,
+  BenefitAccountState,
+  BenefitCampaign,
+  BenefitClaimResponse,
+  BenefitQueryResponse,
+  BenefitStatusResponse,
   ClientProfile,
   GrowthAccountTasks,
   GrowthJobSnapshot,
@@ -515,6 +520,22 @@ export const growthApi = {
   job: (jobId: string) => get<GrowthJobSnapshot>(`/api/growth/job/${jobId}`),
   claim: (account_ids: number[], task_codes: string[] | null = null) =>
     post<{results: GrowthRunAccountResult[]}>('/api/growth/claim', {account_ids, task_codes}),
+};
+
+/* ── 限时权益 / 补偿（routers/benefits.py）─────────────────────
+ *
+ * **本功能不参与任何定时任务**：没有调度入口，只能由用户手动点。
+ * 领取是写操作且不可回滚（上游每账号每期只能领一次），所以分成三步：
+ *   campaign/status（读本地） → query（读上游） → claim（写上游）
+ * 前端必须让用户看到 query 结果后再决定是否 claim。
+ */
+export const benefitsApi = {
+  campaign: () => get<BenefitCampaign>('/api/benefits/campaign'),
+  status: () => get<BenefitStatusResponse>('/api/benefits/status'),
+  query: (account_ids: number[]) =>
+    post<BenefitQueryResponse>('/api/benefits/query', {account_ids}),
+  claim: (account_ids: number[]) =>
+    post<BenefitClaimResponse>('/api/benefits/claim', {account_ids}),
 };
 
 export type {Account};

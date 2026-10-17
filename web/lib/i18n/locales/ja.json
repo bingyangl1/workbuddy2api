@@ -70,7 +70,8 @@
     "growth": "成長プラン",
     "audit": "操作監査",
     "accountGroups": "アカウントグループ",
-    "layout": "レイアウト"
+    "layout": "レイアウト",
+    "benefits": "期間限定特典"
   },
   "login": {
     "subtitle": "Tencent CodeBuddy アカウントプール管理 · OpenAI 互換リバースプロキシゲートウェイ",
@@ -2130,19 +2131,21 @@
     "deleteTitle": "ジョブ削除",
     "deleteConfirm": "ジョブ「{name}」を削除しますか？",
     "delete": "削除",
-    "task.refresh_balances": "総残高を更新",
-    "task.refresh_credits": "クレジット期限スナップショット更新",
-    "task.sync_models": "モデル一覧を同期",
-    "task.daily_checkin": "デイリーチェックイン",
-    "task.refresh_growth_tasks": "グロースタスク一覧を更新",
-    "task.run_growth_tasks": "グロースタスクを自動実行",
-    "task.keepalive_tokens": "トークン keep-alive（毎時）",
     "realmNote": "国際版アカウントのゲート",
     "realmNoteDesc": "国際版（global）アカウントにはチェックイン / 成長 / 猫の旅 / 新学期 / 夜猫などの仕組みが無く、これらのタスクは自動的にスキップし「国際版アカウント N 件は該当なし」と報告します。残高更新・クレジット同期・モデル同期・トークン保持は通常どおり実行されます。",
     "realmTagGlobal": "国際版は対象外",
     "realmApplicable": "対象バージョン",
     "realmBoth": "国内版 + 国際版",
-    "realmCnOnly": "国内版のみ"
+    "realmCnOnly": "国内版のみ",
+    "task": {
+      "refresh_balances": "総残高を更新",
+      "refresh_credits": "クレジット期限スナップショット更新",
+      "sync_models": "モデル一覧を同期",
+      "daily_checkin": "デイリーチェックイン",
+      "refresh_growth_tasks": "グロースタスク一覧を更新",
+      "run_growth_tasks": "グロースタスクを自動実行",
+      "keepalive_tokens": "トークン keep-alive（毎時）"
+    }
   },
   "growth": {
     "title": "グロースプラン",
@@ -2323,5 +2326,44 @@
     "toggleVisible": "{name} の表示/非表示",
     "unsaved": "未保存の変更があります。右上の「保存」を押してください。",
     "locked": "非表示不可"
+  },
+  "benefits": {
+    "title": "期間限定特典",
+    "subtitle": "アカウントの期間限定特典・補償を確認して受け取ります（手動実行）",
+    "manualOnly": "手動実行のみ：",
+    "manualOnlyHint": "この機能は定期タスクに含まれません。上流は重複受取を検知するため、確認するまでリクエストは送信されません。",
+    "accountsChecked": "確認済みアカウント",
+    "accountsClaimed": "受取済みアカウント",
+    "creditsClaimed": "受取クレジット",
+    "refresh": "更新",
+    "query": "受取可能か確認",
+    "querying": "確認中…",
+    "queryHint": "上流に受取可能か問い合わせます（読み取りのみ、繰り返し可能）",
+    "claim": "受け取る",
+    "claiming": "受取中…",
+    "selected": "{n} 件選択",
+    "selectAll": "すべて選択",
+    "account": "アカウント",
+    "realm": "版",
+    "realmCn": "中国版",
+    "realmGlobal": "国際版",
+    "status": "状態",
+    "detail": "詳細",
+    "claimedAt": "受取日時",
+    "empty": "利用可能なアカウントがありません",
+    "confirmTitle": "受取の確認",
+    "confirmBody": "{n} 件のアカウントに受取リクエストを送信します。",
+    "confirmIrreversible": "受取は書き込み操作で取り消せません。1 アカウントにつき 1 期間 1 回のみで、重複は異常と判定される可能性があります。",
+    "cancel": "キャンセル",
+    "confirmYes": "受け取る",
+    "st": {
+      "available": "受取可能",
+      "already": "受取済み",
+      "claimed": "受取済み",
+      "expired": "期限切れ",
+      "ineligible": "対象外",
+      "unknown": "不明",
+      "error": "確認失敗"
+    }
   }
 }

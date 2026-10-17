@@ -17,7 +17,7 @@ from admin.config import settings
 from admin.db import SessionLocal, init_db, wait_database_ready
 from admin.models import SystemSetting
 from admin.routers import (account_groups, accounts, app_source, audit, backup,
-                           client_profile, credits, groups, growth, keys,
+                           benefits, client_profile, credits, groups, growth, keys,
                            layout as layout_router,
                            login as login_router, logs, models, playground, proxy,
                            schedules, security as security_router, stats, sync, tokens)
@@ -158,6 +158,8 @@ app.include_router(groups.router)
 app.include_router(stats.router)
 app.include_router(credits.router)
 app.include_router(growth.router)
+# 限时权益 / 补偿（**只能手动跑**：不进 TASK_CHOICES，也没有任何调度入口）
+app.include_router(benefits.router)
 app.include_router(client_profile.router)
 app.include_router(app_source.router)
 app.include_router(login_router.router)

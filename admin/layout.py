@@ -46,7 +46,7 @@ NAV_ITEMS: tuple[str, ...] = (
     # 数据
     "/stats", "/logs", "/credits",
     # 自动化
-    "/schedules", "/growth",
+    "/schedules", "/growth", "/benefits",
     # 治理
     "/security", "/audit", "/account-groups",
     # 系统
