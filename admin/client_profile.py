@@ -640,6 +640,14 @@ def _compose(saved: dict, src: str, detected: dict, realm: str = "") -> dict:
     out["headers"] = dict(DEFAULTS.get("headers") or {})
 
     layers = ([detected, saved] if src == SOURCE_SAVED else [saved, detected])
+    # 注意：`detected` 已经**按 realm 分好**了 —— 调用方传进来的是
+    # `snapshot(realm=r)` / `d = self._detected.get(r)`，即「该 realm 对应的
+    # 那份探测结果」。所以这里**不需要**再按 realm 过滤。
+    #
+    # 历史教训：我曾在这里加过「探测值只在 application_name 与 realm 一致时
+    # 才采用」的过滤，结果把 `test_realm_fallback_complete` 的
+    # 「无客户端环境」用例搞挂了 —— 那种场景下 `detected` 为空，
+    # 过滤逻辑误判成「探测值属于另一个 realm」而跳过了更高的层。
     for layer in layers:
         for k, v in layer.items():
             if k == "headers" and isinstance(v, dict):

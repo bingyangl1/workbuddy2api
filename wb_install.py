@@ -862,13 +862,56 @@ class _WorkBuddyInstall:
         实现方式：临时装一个目录名过滤器，让 `_candidate_dirs` 只产出该 realm
         的候选；`_resolve()` 的其余逻辑（读 manifest / product.json / 兜底）
         完全复用，不重复实现，避免两版行为漂移。
+
+        ## 目录名与内容不一致时**不采信**（真 bug 修复）
+
+        `_candidate_dirs` 是按**目录名**筛的（`WorkBuddy` → cn，
+        `WorkBuddyAI` → global）。但目录名不等于内容 —— 实测遇到过：
+        国际版客户端被装在 `D:\\Software\\WorkBuddy`（国内版的目录名）里，
+        于是 `_realm_data('cn')` 读出了 `applicationName=workbuddy-ai`、
+        `desktop_version=5.8.4` —— **国内版档案里混进整套国际版身份**。
+
+        后果：`realm.ua_brand('cn')` 返回 `'workbuddy-ai'`，
+        国内版账号会带着国际版 UA 出站（混用特征）。
+
+        所以这里在探测完之后做一次**一致性校验**：读到的
+        `application_name` 必须与该 realm 期望的品牌相符，否则视为
+        「本机没有这个版本的客户端」，返回空档案让兜底/已保存值接手。
+
+        判定用「包含」而非严格相等：官方两版的 `applicationName`
+        分别是 `WorkBuddy` 与 `workbuddy-ai`，用子串包含已经足够区分，
+        且对大小写/后缀变化更宽容。
         """
         prev = getattr(self, "_realm_filter", "")
         self._realm_filter = realm
         try:
-            return self._resolve()
+            data = self._resolve()
         finally:
             self._realm_filter = prev
+
+        if not isinstance(data, dict):
+            return data
+        inst = data.get("install_dir")
+        brand = str(data.get("application_name") or "").strip().lower()
+        if not inst or not brand:
+            return data       # 没探测到 / 没有品牌信息 —— 保持原样
+
+        # 该 realm 期望的品牌标记：
+        #   cn     → 不能出现 "ai"（`workbuddy` vs `workbuddy-ai`）
+        #   global → 必须包含 "ai"
+        looks_global = "ai" in brand.replace("workbuddy", "").replace("-", "")
+        want_global = (realm or "").strip().lower() == "global"
+        if looks_global != want_global:
+            _logger.warning(
+                "WorkBuddy[%s] 目录 %s 里的实际产品是 %r（与目录名不符），"
+                "本次不采信该探测结果 —— 避免把另一版的身份套到这一版上",
+                realm, inst, data.get("application_name"))
+            return {"install_dir": None, "asar": None, "unpacked": None,
+                    "desktop_version": "", "cli_version": "",
+                    "turing_channel_id": 0, "turing_product_name": "",
+                    "commit": "", "release_date_ms": 0, "deployment_type": "",
+                    "application_name": "", "plugin_name": "", "sources": {}}
+        return data
 
     def asar_path(self, realm: str = "") -> Path | None:
         """app.asar 的完整路径（找不到返回 None）。"""
@@ -1254,14 +1297,44 @@ class _WorkBuddyInstall:
     def _realm_matches(self, realm: str) -> bool:
         """本机探测到的客户端是否属于该 realm。
 
-        判据用 `install_dir` 名（最可靠、不依赖 product.json 是否可读）：
-        路径里出现 `WorkBuddyAI` / `workbuddy-ai` → global；否则 → cn。
+        ## 判据优先级（重要）
+
+        1. **实际产品名**（`application_name` / `win32ExecutableName`）——
+           这是磁盘上真实的东西，最可靠
+        2. 目录名（`install_dir` 里是否有 `WorkBuddyAI`）—— 只作兜底
+
+        ## 为什么要优先看产品名（真 bug）
+
+        原来只看目录名：
+
+            s = str(install_dir).lower()
+            if "workbuddyai" in s: return realm == "global"
+            return realm == "cn"
+
+        但**目录名不等于内容**。实测遇到过：国际版客户端被装在
+        `D:\\Software\\WorkBuddy`（国内版的目录名）里 ——
+        于是 `_realm_matches('cn')` 返回 True，`turing_channel_id('cn')`
+        直接采用主探测的 `400111`（国际版渠道号）→ **国内版报国际版渠道号**。
+
+        这与「国际版报国内版渠道号」正好相反，但同样是混用特征。
+        用户装错目录是很常见的事（手动指定路径、旧版残留、覆盖安装）。
         """
         try:
-            d = self._data().get("install_dir")
-            if not d:
+            d = self._data()
+            app = str(d.get("application_name") or "").strip().lower()
+            exe = str(d.get("plugin_name") or "").strip().lower()
+            # ① 产品名优先：`workbuddy-ai` / `WorkBuddyAI` → global
+            brand = f"{app} {exe}".replace("-", "").replace(" ", "")
+            if "workbuddyai" in brand:
+                return realm == "global"
+            if brand.strip():
+                # 有明确产品名且不含 AI → cn
+                return realm == "cn"
+            # ② 产品名缺失（老版本 / product.json 读不到）→ 退回目录名
+            inst = d.get("install_dir")
+            if not inst:
                 return False
-            s = str(d).lower().replace("-", "").replace(" ", "")
+            s = str(inst).lower().replace("-", "").replace(" ", "")
             if "workbuddyai" in s:
                 return realm == "global"
             return realm == "cn"

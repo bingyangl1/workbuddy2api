@@ -153,7 +153,50 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 if (isAdmin(url) && LocalApiService.token != null) {
-                    web.evaluateJavascript("window.WBMobile && WBMobile.initialize(" + JSONObject.quote(LocalApiService.token) + ")", null);
+                    // ── 免密登录：**直接把 token 写进浏览器存储** ──────
+                    //
+                    // 为什么不只调 `WBMobile.initialize()`：
+                    //
+                    //   `mobile.js`（含 WBMobile）只被注入到**旧面板**的
+                    //   `admin/static/index.html`。新面板是 Next.js 静态产物，
+                    //   **根本不加载 mobile.js** —— 于是 `window.WBMobile` 不存在，
+                    //   `&&` 短路，token 永远写不进去，新面板停在登录页。
+                    //
+                    // ## 三个存储点，缺一不可
+                    //
+                    //   旧面板 admin/static/index.html → localStorage 'wb_admin_token'
+                    //   新面板 web/lib/api.ts           → **sessionStorage** 'wb-admin-token'
+                    //      （`readToken()` 只读 sessionStorage，写 localStorage 读不到！）
+                    //   兜底：localStorage 也写一份 'wb-admin-token'，
+                    //      供将来可能改成持久化的实现使用
+                    String t = JSONObject.quote(LocalApiService.token);
+                    String inject = "(function(){try{"
+                        + "var v=" + t + ";"
+                        + "localStorage.setItem('wb_admin_token',v);"
+                        + "localStorage.setItem('wb-admin-token',v);"
+                        + "sessionStorage.setItem('wb-admin-token',v);"
+                        + "}catch(e){}"
+                        + "try{if(window.WBMobile&&WBMobile.initialize){"
+                        + "WBMobile.initialize(" + t + ");}}catch(e){}"
+                        // 新面板：token 是「页面加载完之后」才写进来的，
+                        // 此时 React 早已判定未登录并跳到了 /login/。
+                        // 补一次跳转 —— 只在停在 login 页或根路径时做，
+                        // 避免打断用户已经在操作的页面。
+                        //
+                        // 用 sessionStorage 标记防循环：跳转后 `onPageFinished`
+                        // 会再次触发，若条件仍成立就会无限刷新。
+                        + "try{"
+                        + "var FLAG='wb_auto_entered';"
+                        + "if(!sessionStorage.getItem(FLAG)){"
+                        + "  var p=location.pathname||'';"
+                        + "  var need=(p.indexOf('/login')>=0||p===''||p==='/'||"
+                        + "            p==='/panel'||p==='/panel/');"
+                        + "  if(need){sessionStorage.setItem(FLAG,'1');"
+                        + "    location.replace('/panel/dashboard/');return;}"
+                        + "}"
+                        + "}catch(e){}"
+                        + "})();";
+                    web.evaluateJavascript(inject, null);
                     boot.setVisibility(View.GONE);
                 }
             }
@@ -338,7 +381,22 @@ public class MainActivity extends Activity {
                 if (!refreshed.isEmpty()) {
                     LocalApiService.token = refreshed;
                     handler.post(() -> {
-                        if (!destroyed && isAdmin(web.getUrl())) web.evaluateJavascript("window.WBMobile && WBMobile.initialize(" + JSONObject.quote(refreshed) + ")", null);
+                        if (!destroyed && isAdmin(web.getUrl())) {
+                            // 与 onPageFinished 同一套逻辑。
+                            // 关键：新面板 `readToken()` 读的是 **sessionStorage**，
+                            // 只写 localStorage 是读不到的（真机踩过）。
+                            String t = JSONObject.quote(refreshed);
+                            String js = "(function(){try{"
+                                + "var v=" + t + ";"
+                                + "localStorage.setItem('wb_admin_token',v);"
+                                + "localStorage.setItem('wb-admin-token',v);"
+                                + "sessionStorage.setItem('wb-admin-token',v);"
+                                + "}catch(e){}"
+                                + "try{if(window.WBMobile&&WBMobile.initialize){"
+                                + "WBMobile.initialize(" + t + ");}}catch(e){}"
+                                + "})();";
+                            web.evaluateJavascript(js, null);
+                        }
                     });
                 }
             } catch (Exception ignored) { }

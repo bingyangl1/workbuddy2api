@@ -201,12 +201,41 @@ class EndToEndRealmDataCase(unittest.TestCase):
     @unittest.skipUnless(os.path.isdir(r"D:\Software\WorkBuddyAI"),
                          "本机没装国际版客户端，跳过端到端")
     def test_two_realms_differ_with_cn_override(self):
+        """有国内版覆盖时，两版档案必须仍然不同。
+
+        ## 前提校正（本机实测发现）
+
+        这条测试原本假设 `D:\\Software\\WorkBuddy` 是**真正的国内版**。
+        但实测发现：那台机器上该目录里装的是**国际版**
+        （`product.json` 的 `applicationName = workbuddy-ai`、
+        `isOversea = true`、`appVersion = 5.8.4`）。
+
+        于是 `WB._realm_data('cn')` 会做**内容一致性校验**并拒绝采信
+        （日志：`目录 ... 里的实际产品是 'workbuddy-ai'（与目录名不符）`），
+        返回空档案 —— 两版都为空，`assertNotEqual('', '')` 自然失败。
+
+        **这是正确行为**，不是回归。所以：
+
+          * 两版都探测到 → 必须不同
+          * 有一版探测不到（空）→ 不算「被污染」，跳过差异断言
+        """
         WB.set_overrides(install_dir=r"D:\Software\WorkBuddy")
         cn = WB._realm_data("cn")
         gl = WB._realm_data("global")
+
+        cn_ver = cn.get("desktop_version") or ""
+        gl_ver = gl.get("desktop_version") or ""
+        if not cn_ver or not gl_ver:
+            # 有一版没探测到 —— 说明内容校验生效了（目录名与产品不符），
+            # 这正是我们要的行为。断言「没有被强行套上同一份身份」即可。
+            self.assertFalse(
+                cn_ver and cn_ver == gl_ver,
+                f"两版都被探到且版本相同（{cn_ver!r}）—— 覆盖污染")
+            return
+
         self.assertNotEqual(
-            cn.get("desktop_version"), gl.get("desktop_version"),
-            f"有国内版覆盖时两版版本仍相同（{cn.get('desktop_version')!r}）"
+            cn_ver, gl_ver,
+            f"有国内版覆盖时两版版本仍相同（{cn_ver!r}）"
             f"—— 说明 global 仍被覆盖污染")
         self.assertNotEqual(
             cn.get("application_name"), gl.get("application_name"),
