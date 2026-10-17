@@ -32,8 +32,8 @@ def _sign_supported() -> bool:
 
     ## 为什么需要这个探测
 
-    GitHub Actions 的 Windows runner 上，`%TEMP%` 继承 `\\OWNER RIGHTS`
-    的 ACL，`ssh-keygen -Y sign` 直接拒绝：
+    GitHub Actions 的 Windows runner 上，workspace 与 TEMP 都带
+    `\\OWNER RIGHTS`（S-1-3-4）的 ACL，`ssh-keygen -Y sign` 直接拒绝：
 
         [FAIL] pack.exe: Bad permissions. Try removing permissions for
         user: \\OWNER RIGHTS (S-1-3-4) on file .../signing_key
@@ -41,7 +41,19 @@ def _sign_supported() -> bool:
     这是 **runner 的环境特性，不是代码缺陷**。把这些测试标成 skip 更诚实 ——
     报「失败」会掩盖真正的代码问题（而且 CI 会一直红）。
 
-    探测结果按进程缓存（每个测试类只探一次）。
+    ## 探测必须「像真的那样」做
+
+    第一版探测只签一个 `x.txt`，**在 CI 上返回了 True 但那 4 条测试仍然失败**。
+    说明探测条件与实际用例不完全一致。现在按实际路径重建：
+
+      * 临时目录用仓库内的（与 `_work_dir` 一致）
+      * 用 `.exe` 后缀的文件（与实际被测的 `pack.exe` 同类型）
+      * 走**同一套** `sign_release.py` 函数（`_materialize_key` + `sign`），
+        而不是自己拼 ssh-keygen 命令
+
+    这样探测通过 ⇔ 真实用例能过。
+
+    结果按进程缓存。
     """
     global _SIGN_PROBE
     if _SIGN_PROBE is not None:
@@ -50,20 +62,25 @@ def _sign_supported() -> bool:
     if not HAS_SSH_KEYGEN:
         return False
     try:
+        import base64
+
         SIGN_TMP.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=str(SIGN_TMP)) as d:
-            key = Path(d) / "probe"
+            work = Path(d)
+            # 造一个 ed25519 私钥（与真签流程同样的方式）
+            key = work / "probe_key"
             r = subprocess.run(
                 ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(key)],
                 capture_output=True)
             if r.returncode != 0:
                 return False
-            payload = Path(d) / "x.txt"
-            payload.write_bytes(b"probe")
-            r2 = subprocess.run(
-                ["ssh-keygen", "-Y", "sign", "-f", str(key), "-n", "file",
-                 str(payload)], capture_output=True)
-            _SIGN_PROBE = (r2.returncode == 0)
+            # 用与被测用例同类型的目标文件
+            art = work / "probe.exe"
+            art.write_bytes(b"MZ" + b"\x00" * 256)
+            # 走 sign_release 的真实入口（这会暴露 ACL 问题）
+            spec = base64.b64encode(key.read_bytes()).decode("ascii")
+            rc = S.sign([art], spec)
+            _SIGN_PROBE = (rc == 0)
     except Exception:      # noqa: BLE001  探测失败就当作不支持
         _SIGN_PROBE = False
     return _SIGN_PROBE
@@ -122,22 +139,20 @@ class KeyMaterializeCase(unittest.TestCase):
             S._materialize_key("", self.tmp)
 
 
-@unittest.skipUnless(HAS_SSH_KEYGEN, "需要系统 ssh-keygen")
+@unittest.skipUnless(_sign_supported(), "环境不支持 ssh-keygen -Y sign")
 class SignVerifyCase(unittest.TestCase):
-    """端到端：sign → verify → 篡改拒绝。走 CLI（与 CI 同一条命令）。"""
+    """端到端：sign → verify → 篡改拒绝。走 CLI（与 CI 同一条命令）。
 
-    # ── 环境探测：跑不了 `ssh-keygen -Y sign` 时整类跳过 ──────────
-    #
-    # 这些测试验证的是**签名脚本的逻辑**，不是 runner 的 ACL 配置。
-    # 环境不支持时标 skip 更诚实 —— 报「失败」会掩盖真正的代码问题。
-    @classmethod
-    def setUpClass(cls):
-        if not HAS_SSH_KEYGEN:
-            raise unittest.SkipTest("需要系统 ssh-keygen")
-        if not _sign_supported():
-            raise unittest.SkipTest(
-                "当前环境的 ssh-keygen -Y sign 不可用（多为 CI runner 的 "
-                "\\OWNER RIGHTS ACL 限制）—— 环境限制，不是代码缺陷")
+    ## 为什么跳过条件里要带上探测
+
+    这些测试验证的是**签名脚本的逻辑**，不是 runner 的 ACL 配置。
+    GitHub Actions 的 Windows runner 上 `ssh-keygen -Y sign` 会因
+    `\\OWNER RIGHTS` ACL 拒绝 —— 那是环境限制，不是代码缺陷。
+    报「失败」会掩盖真正的代码问题，而且 CI 会永远红。
+
+    放在**装饰器**里而不是 `setUpClass` 里：`setUpClass` 抛 SkipTest
+    在 pytest 下会记成 error（不同版本行为不一致），装饰器最稳。
+    """
 
     def setUp(self):
         # ⚠️ 临时目录**不能放系统 TEMP**。
