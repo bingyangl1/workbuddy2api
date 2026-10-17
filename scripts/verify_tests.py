@@ -352,6 +352,16 @@ MUTATIONS: list[Mutation] = [
             "（realm.md 等 4 份文档曾长期这样）",
         tags=["docs"],
     ),
+    Mutation(
+        name="plan-test-count-stale",
+        file="../PLAN-fork.md",
+        old="| 测试文件 | **59 个** |",
+        new="| 测试文件 | **99 个** |",
+        tests=["tests/test_docs_links.py::PlanFileNumbersCase"],
+        why="计划文件里的数字过期 → 它是判断进度最常用的依据，"
+            "数字不可信就等于进度不可信",
+        tags=["docs"],
+    ),
     # ── Anthropic 工具配对顺序（上游 06e1b46 的同一个 bug）──────────
     Mutation(
         name="anthropic-tool-order",

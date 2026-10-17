@@ -192,5 +192,85 @@ class DocumentedNumbersCase(unittest.TestCase):
             f"panel.md 写 {documented} 个页面，实际 {actual} 个")
 
 
+class PlanFileNumbersCase(unittest.TestCase):
+    """计划文件（工作区根的 `PLAN-fork.md`）里的数字也要能复现。
+
+    ## 为什么单独一组
+
+    `PLAN-fork.md` **不在 git 仓库里**（在工作区根目录，按设计如此），
+    所以不能像其他文档那样由 `test_docs_links` 统一校验「链接存在」。
+    但它的**数字**同样会过期 —— 而且它是最常被用来判断进度的地方。
+
+    计划文件不存在时整组 skip（别人 clone 本仓库不会带它）。
+    """
+
+    PLAN = ROOT.parent / "PLAN-fork.md"
+
+    @classmethod
+    def setUpClass(cls):
+        if not cls.PLAN.is_file():
+            raise unittest.SkipTest(
+                "工作区根目录没有 PLAN-fork.md（不在仓库内，属正常）")
+        cls.text = cls.PLAN.read_text(encoding="utf-8")
+
+    def test_test_file_count(self):
+        """计划文件写的测试文件数要与实际一致。"""
+        actual = len(list((ROOT / "tests").glob("test_*.py")))
+        m = re.search(r"\|\s*测试文件\s*\|\s*\**(\d+)\s*个", self.text)
+        self.assertIsNotNone(m, "计划文件里应写明测试文件数")
+        documented = int(m.group(1))
+        self.assertEqual(
+            documented, actual,
+            f"计划文件写 {documented} 个测试文件，实际 {actual} 个")
+
+    def test_page_count(self):
+        """计划文件写的面板页面数要与实际一致。"""
+        actual = len(list((ROOT / "web" / "app").rglob("page.tsx")))
+        m = re.search(r"\|\s*面板页面\s*\|\s*\**(\d+)\s*个", self.text)
+        self.assertIsNotNone(m, "计划文件里应写明面板页面数")
+        documented = int(m.group(1))
+        self.assertEqual(
+            documented, actual,
+            f"计划文件写 {documented} 个页面，实际 {actual} 个")
+
+    def test_mutation_count(self):
+        """计划文件写的 mutation 数要与实际一致。"""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "verify_tests_plan_probe", ROOT / "scripts" / "verify_tests.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        try:
+            spec.loader.exec_module(mod)      # type: ignore[union-attr]
+        except Exception as e:      # noqa: BLE001
+            self.skipTest(f"无法加载 verify_tests：{e}")
+        actual = len(mod.MUTATIONS)
+
+        m = re.search(r"\|\s*反向验证 mutation\s*\|\s*\**(\d+)\s*条",
+                      self.text)
+        self.assertIsNotNone(m, "计划文件里应写明 mutation 数")
+        documented = int(m.group(1))
+        self.assertEqual(
+            documented, actual,
+            f"计划文件写 {documented} 条 mutation，实际 {actual} 条")
+
+    def test_no_unchecked_items_left(self):
+        """应当没有未勾选的任务项（除非明确说明是待办）。
+
+        这条防的是「计划文件永远显示有欠账」—— 如果某件事其实完成了但
+        忘了打勾，读者会以为还没做。
+        """
+        unchecked = re.findall(r"^- \[ \] (.+)$", self.text, re.M)
+        # 允许明确标注为「依赖外部条件」的项
+        allowed_markers = ("等真机验证", "等用户", "待用户", "未做", "有意未做")
+        unexpected = [u for u in unchecked
+                      if not any(k in u for k in allowed_markers)]
+        self.assertEqual(
+            unexpected, [],
+            "计划文件里有未勾选但没说明原因的任务："
+            f"{[u[:60] for u in unexpected]}")
+
+
 if __name__ == "__main__":
     unittest.main()
