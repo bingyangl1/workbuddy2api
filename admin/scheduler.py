@@ -777,8 +777,16 @@ def seed_defaults(db):
                         interval_minutes=1440, enabled=1, next_run_at=now))
         db.add(Schedule(name="每日更新成长任务列表", task="refresh_growth_tasks",
                         interval_minutes=1440, enabled=1, next_run_at=now))
+        # 「自动做成长任务」**默认不启用**（enabled=0）。
+        #
+        # 为什么与上面几个任务不同：它会真实地给账号发任务请求、消耗上游额度，
+        # 而且上游对**重复执行**有检测（多跑会被判异常）。用户的要求是
+        # 「默认不启用」，想要时自己在「定时任务」页打开即可 —— 不额外加设置项。
+        #
+        # 注意这里仍然**建出这一行**（只是关着）：用户能在列表里看到这个能力存在，
+        # 知道去哪里开。完全不建的话，功能等于对用户隐藏了。
         db.add(Schedule(name="每日自动做成长任务", task="run_growth_tasks",
-                        interval_minutes=1440, enabled=1,
+                        interval_minutes=1440, enabled=0,
                         next_run_at=now + timedelta(seconds=_GROWTH_MIN_AFTER_REFRESH)))
         db.commit()
 
@@ -841,8 +849,11 @@ def ensure_growth_schedules(db):
     run = db.query(Schedule).filter(Schedule.task == "run_growth_tasks").first()
     if run is None:
         base = refresh.next_run_at or now
+        # **默认不启用**（与 seed_defaults 保持一致）：这个任务会真实发任务请求、
+        # 消耗上游额度，且上游对重复执行有检测。建出记录只是让用户知道有这个能力，
+        # 开不开由用户在「定时任务」页决定。
         db.add(Schedule(name="每日自动做成长任务", task="run_growth_tasks",
-                        interval_minutes=1440, enabled=1,
+                        interval_minutes=1440, enabled=0,
                         next_run_at=base + timedelta(seconds=_GROWTH_MIN_AFTER_REFRESH)))
         changed = True
     else:
