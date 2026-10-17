@@ -78,7 +78,19 @@ class SignVerifyCase(unittest.TestCase):
     """端到端：sign → verify → 篡改拒绝。走 CLI（与 CI 同一条命令）。"""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="wb-sign-e2e-"))
+        # ⚠️ 临时目录**不能直接用系统 TEMP**。
+        #
+        # GitHub Actions 的 Windows runner 上，`%TEMP%` 继承了
+        # `\\OWNER RIGHTS` 的 ACL，`ssh-keygen -Y sign` 会直接拒绝：
+        #
+        #     [FAIL] pack.exe: Bad permissions. Try removing permissions for
+        #     user: \\OWNER RIGHTS (S-1-3-4) on file .../signing_key
+        #
+        # 这是 runner 的环境特性（不是代码缺陷），但会让测试全红。
+        # 改用「仓库内的临时目录」—— 它继承正常的 ACL。
+        base = Path(__file__).resolve().parent.parent / ".pytest_sign_tmp"
+        base.mkdir(exist_ok=True)
+        self.tmp = Path(tempfile.mkdtemp(prefix="wb-sign-e2e-", dir=str(base)))
         subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f",
                         str(self.tmp / "k"), "-C", "workbuddy2api-release"],
                        capture_output=True, check=True)

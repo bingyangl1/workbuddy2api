@@ -166,6 +166,18 @@ jobs:
           for f in *.apk; do sha256sum "$f" > "$f.sha256"; done
           ls -la
 
+      # **构建 success ≠ 产物可用**。
+      #
+      # Gradle 退出码 0 只说明「编译过了」，不代表 APK 里有我们的代码。
+      # 这一步真的把 APK 当 zip 解剖，确认 `assets/chaquopy/app.imy`
+      #（Chaquopy 的源码包）里有 converter.py、admin/server.py、
+      # 各路由模块、错误码数据，且**没有**凭证/数据库/密钥。
+      - name: Verify APK actually contains our code
+        run: |
+          mkdir -p _apkcheck
+          cp dist/android/*.apk _apkcheck/
+          python -m pytest tests/test_apk_content.py -q
+
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk

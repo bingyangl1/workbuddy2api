@@ -148,3 +148,6 @@ _relkey/
 # 面板冒烟测试输出（本地验收用，不入库）
 _fulltest.json
 scripts/_fulltest.json
+
+# 签名测试的临时目录（ssh-keygen 需要正常 ACL 的目录）
+/.pytest_sign_tmp/

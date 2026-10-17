@@ -195,8 +195,26 @@ class DeviceTokenRealmCase(unittest.TestCase):
                          str(GL_SIG["channel"]),
                          "下发给 helper 的 channelId 必须是国际版的 400111")
         self.assertEqual(str(env.get("WORKBUDDY_TURING_VERSION")), GL_SIG["ver"])
-        self.assertIn("WorkBuddyAI", str(env.get("WORKBUDDY_INSTALL_DIR", "")),
-                      "下发的安装目录必须是国际版目录")
+
+        # 安装目录：**只有真正探测到才下发**。
+        #
+        # `WB.install_dir(realm="global")` 在没装客户端的环境（CI / 服务器）
+        # 返回 None，此时刻意**不**下发 `WORKBUDDY_INSTALL_DIR` ——
+        # 交给 `turing_helper.js` 自己按本机位置发现。
+        # 硬塞一个不存在的路径反而会让 helper 报错。
+        #
+        # 这条断言原来写死「必须含 WorkBuddyAI」→ 本地（装了客户端）绿、
+        # CI（没装）红。改为：
+        #   * 有值 → 必须是国际版目录
+        #   * 没值 → 也算正确（探测不到就不下发）
+        inst = str(env.get("WORKBUDDY_INSTALL_DIR", ""))
+        if inst:
+            self.assertIn("WorkBuddyAI", inst,
+                          f"下发的安装目录必须是国际版目录，实际 {inst!r}")
+        else:
+            self.assertNotIn("WORKBUDDY_INSTALL_DIR", env,
+                             "探测不到安装目录时**不该下发**这个变量 —— "
+                             "硬塞不存在的路径会让 helper 报错")
 
 
 class FallbackUACase(unittest.TestCase):
