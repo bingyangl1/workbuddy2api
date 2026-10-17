@@ -157,3 +157,6 @@ scripts/_fulltest.json
 
 # 真机验证截图（含设备信息，不入库）
 /_shots/
+
+# 真机验证用的临时 APK
+/_newapk/

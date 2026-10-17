@@ -23,7 +23,8 @@
 
 | 场景 | 文档 |
 |---|---|
-| 单机 / 桌面 / 安卓（零外部依赖） | [MOBILE-AND-SINGLE-NODE.md](MOBILE-AND-SINGLE-NODE.md) |
+| 单机 / 桌面 / 安卓（零外部依赖） | [ANDROID-VERIFY.md](ANDROID-VERIFY.md) | **安卓真机验证报告**（OnePlus 9 / Android 16）：装即用，含 3 层根因分析 | ✅ |
+| [MOBILE-AND-SINGLE-NODE.md](MOBILE-AND-SINGLE-NODE.md) |
 | 服务端（MySQL + Redis） | 主 [README §四](../README.md#四环境安装与项目运行) |
 
 ### 我要用起来
