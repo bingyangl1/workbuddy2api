@@ -90,8 +90,16 @@ _CACHE_TTL = 30.0
 # ---------------------------------------------------------------------------
 DEFAULTS: dict[str, Any] = {
     # --- 版本（决定 UA 与 X-IDE-Version）---
-    "desktop_version": "5.5.6",
-    "cli_version": "2.137.1",
+    #
+    # 这两项是**最后的兜底**。真正分 realm 的值在 `_REALM_DEFAULTS` 里
+    # （cn 5.8.3 / global 5.8.4），这里保持与国内版一致以便任何
+    # 「没带 realm」的旧调用路径也不算离谱。
+    #
+    # 历史：这里原来是 `5.5.6` / `2.137.1` —— realm 双域改造之前的旧版客户端。
+    # 探测不到客户端时（服务器 / CI / 手机）两版都会报这个值，
+    # 既是过时版本号，又会造成「两版同版本」的混用特征。
+    "desktop_version": "5.8.3",
+    "cli_version": "2.161.0",
     # --- 风控 SDK ---
     "turing_product_name": "WorkBuddy",
     # --- 用量归属（X-IDE-Name / X-IDE-Type / X-Product）---
@@ -162,6 +170,23 @@ _REALM_DEFAULTS: dict[str, dict[str, Any]] = {
         "turing_channel_id": 109144,
         "application_name": "WorkBuddy",
         "ext_name": "workbuddy-desktop",
+        # ⚠️ **版本号必须在这里兜底**，不能只靠 `DEFAULTS`。
+        #
+        # 元凶是一个只在「探测不到客户端」时才暴露的缺陷：
+        # `DEFAULTS` 里写的是 `5.5.6` / `2.137.1`（realm 双域改造之前的旧值），
+        # 而 `_REALM_DEFAULTS` 原来**没有覆盖这两项** —— 于是服务器 / CI /
+        # 手机上探测不到客户端时，两版**都**报 5.5.6：
+        #
+        #     cn     期望 5.8.3  →  实际 5.5.6  ❌
+        #     global 期望 5.8.4  →  实际 5.5.6  ❌
+        #
+        # 这不只是「版本旧一点」：两版报同一个版本号本身就是混用特征
+        # （官方两版版本号不同），而且 5.5.6 是很久以前的旧客户端。
+        #
+        # 本地开发机装了客户端，探测得到真值，所以一直没暴露；
+        # CI（无客户端）才把它打出来。
+        "desktop_version": "5.8.3",
+        "cli_version": "2.161.0",
     },
     "global": {
         "ide_name": "workbuddy-ai",
@@ -170,6 +195,8 @@ _REALM_DEFAULTS: dict[str, dict[str, Any]] = {
         "turing_channel_id": 400111,
         "application_name": "workbuddy-ai",
         "ext_name": "workbuddy-desktop-ai",
+        "desktop_version": "5.8.4",
+        "cli_version": "2.161.0",
     },
 }
 

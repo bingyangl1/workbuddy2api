@@ -318,5 +318,73 @@ class NotFollowing10_6Case(unittest.TestCase):
             "应同时跟进 1.0.6 的流式心跳与取消清理")
 
 
+class DefaultsNotStaleCase(unittest.TestCase):
+    """**兜底默认值必须按 realm 分，且不能是旧版本。**
+
+    ## 这个缺陷只在 CI 暴露
+
+    本地开发机装了 WorkBuddy 客户端，`client_profile` 探测得到真值
+    （5.8.3 / 5.8.4），所以一直看不出问题。
+
+    但服务器 / CI / 手机**没有客户端**，走的是兜底默认值 ——
+    而 `DEFAULTS` 里写的是 realm 双域改造之前的 `5.5.6` / `2.137.1`，
+    且 `_REALM_DEFAULTS` **没有覆盖这两项**，于是：
+
+        cn     期望 5.8.3  →  实际 5.5.6   ❌
+        global 期望 5.8.4  →  实际 5.5.6   ❌
+
+    后果不只是「版本旧」：**两版报同一个版本号本身就是混用特征**
+    （官方两版版本号不同），而且 5.5.6 是很久以前的旧客户端。
+
+    CI 跑全量测试时立刻炸出 6 个失败（`test_realm_audit_rounds` /
+    `test_client_profile_routes_realm` 等），根因都是这一个。
+    """
+
+    def test_realm_defaults_has_version(self):
+        """`_REALM_DEFAULTS` 必须显式覆盖版本号。"""
+        from admin.client_profile import _REALM_DEFAULTS
+        for realm, expect in (("cn", "5.8.3"), ("global", "5.8.4")):
+            got = _REALM_DEFAULTS.get(realm, {})
+            self.assertIn("desktop_version", got,
+                          f"{realm} 的兜底必须含 desktop_version —— "
+                          "否则会回落到 DEFAULTS 的单值")
+            self.assertIn("cli_version", got, f"{realm} 的兜底必须含 cli_version")
+            self.assertEqual(got["desktop_version"], expect)
+
+    def test_defaults_not_ancient(self):
+        """`DEFAULTS` 不能停在旧版本（5.5.6 是双域改造前的值）。"""
+        from admin.client_profile import DEFAULTS
+        ver = str(DEFAULTS.get("desktop_version") or "")
+        self.assertNotEqual(ver, "5.5.6",
+                            "DEFAULTS 不能停在 5.5.6 —— 那是旧客户端版本，"
+                            "探测不到时两版都会报它")
+        # 与 REALM_FALLBACKS 的 cn 值一致（保持单一事实来源）
+        from wb_install import REALM_FALLBACKS
+        self.assertEqual(ver, str(REALM_FALLBACKS["cn"]["desktop_version"]),
+                         "DEFAULTS 的版本应与 REALM_FALLBACKS[cn] 一致")
+
+    def test_effective_differs_without_client(self):
+        """**核心**：探测不到客户端时，两版 effective 也必须不同。"""
+        from unittest import mock
+
+        from admin import client_profile as cp
+
+        # 模拟「这台机器没装任何客户端」
+        with mock.patch.multiple(
+                "wb_install.WB",
+                _data=mock.Mock(return_value={}),
+                _realm_data=mock.Mock(return_value={}),
+                install_dir=mock.Mock(return_value=None)), \
+             mock.patch.object(cp, "saved", mock.Mock(return_value={})), \
+             mock.patch.object(cp, "snapshot_live", mock.Mock(return_value={})):
+            cn = cp.effective(None, realm="cn")
+            gl = cp.effective(None, realm="global")
+
+        self.assertEqual(cn.get("desktop_version"), "5.8.3")
+        self.assertEqual(gl.get("desktop_version"), "5.8.4")
+        self.assertNotEqual(cn.get("desktop_version"), gl.get("desktop_version"),
+                            "**两版版本号相同 = 混用特征**")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -93,8 +93,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      # 安卓运行时只需要 admin/config 与 admin/server 的 import 链能走通，
-      # 先做一次静态校验 —— 比等到 Gradle 构建二十几分钟后才发现缺模块划算。
+      # ⚠️ 顺序：**先构建面板，再跑启动自检**。
+      #
+      # 早先反过来了 —— check_runtime 检查 `/panel/` 时 `web/out` 还没生成，
+      # 于是 404（CI 上实测踩过）。本地能过是因为开发机早就 build 过了。
+      - name: Build web panel
+        working-directory: web
+        run: |
+          npm ci
+          NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      # 安卓运行时只需要 admin/config 与 admin/server 的 import 链能走通 +
+      # 面板产物存在。先做一次静态校验 —— 比等到 Gradle 构建二十几分钟后
+      # 才发现缺模块划算。
       - name: Preflight check (import chain + staging)
         run: |
           python scripts/check_runtime.py
@@ -102,15 +115,6 @@ jobs:
           test -f android/app/build/generated/python/converter.py
           test -f android/app/build/generated/python/admin/server.py
           echo "staging 文件数: $(find android/app/build/generated/python -type f | wc -l)"
-
-      - name: Build web panel
-        working-directory: web
-        run: |
-          npm ci
-          NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel npm run build
-        env:
-          # 面板要打进 APK，必须用静态导出
-          NEXT_TELEMETRY_DISABLED: '1'
 
       # ⚠️ 顺序很重要：**先 restore，再决定要不要生成**。
       #
