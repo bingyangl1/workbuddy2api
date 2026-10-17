@@ -4,7 +4,8 @@ import {useEffect, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {motion} from 'motion/react';
 import {Bot, Loader2, LogIn} from 'lucide-react';
-import {errText} from '@/lib/api';
+import {errText, writeToken} from '@/lib/api';
+import {ensureDesktopToken} from '@/lib/desktop-bridge';
 import {useAuth} from '@/lib/auth-context';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
@@ -24,6 +25,27 @@ export default function LoginPage() {
   useEffect(() => {
     if (!loading && authed) router.replace('/dashboard');
   }, [loading, authed, router]);
+
+  // 桌面端（PyWebView）免密兜底。
+  //
+  // 为什么在**登录页**再做一次：`AuthProvider` 的引导发生在面板首次渲染时，
+  // 那时可能正赶上 `/panel` → `/panel/login/` 的跳转，PyWebView 的 js_api
+  // 回调表会随页面导航被销毁 → 回调失败 → 拿不到 token → 停在登录页。
+  //
+  // 登录页是**稳定页面**（不再跳转），所以这里可以放心**反复重试**：
+  // 桥晚到、第一次调用赶上导航时机，都能自愈。
+  //
+  // 失败就安静地留在登录框（用户仍可手输密码），不弹错、不阻塞渲染。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const token = await ensureDesktopToken();
+      if (cancelled || !token) return;
+      writeToken(token);
+      router.replace('/dashboard');
+    })();
+    return () => { cancelled = true; };
+  }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

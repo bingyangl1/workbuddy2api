@@ -62,6 +62,14 @@ def configure_environment(base: Path) -> dict:
                        "ADMIN_JWT_SECRET": config["jwt_secret"], "PYTHONUTF8": "1",
                        "CONVERTER_API_KEY": config["converter_api_key"],
                        "CONVERTER_LOG": str(base / "logs/converter.log")})
+    # 面板落点：桌面版**默认进新面板**（PyWebView 里它更快、移动端布局也更合适）。
+    #
+    # 为什么放在桌面端配置而不是沿用服务端默认：服务端默认是 legacy，
+    # 那是为了「既有 Web 部署升级后不变样」；而桌面版是全新安装，没有历史包袱。
+    # 环境变量已存在时以用户/运维显式设置为准（不覆盖）。
+    os.environ.setdefault("ADMIN_PANEL_STATIC", "1")
+    os.environ.setdefault("ADMIN_PANEL_PATH", "/panel")
+    os.environ.setdefault("ADMIN_DEFAULT_PANEL", "next")
     configure_node(base)
     os.chdir(base)
     return config
@@ -179,8 +187,43 @@ class DesktopAPI:
     def startup_status(self):
         return {"message": self.message, "failed": self.failed}
 
+    #: 桌面端允许免密登录的路径前缀。
+    #:
+    #: 原实现只认 `/admin?desktop=1`（旧面板）。切到新面板（`/panel`）后
+    #: 这条白名单会让新面板拿不到 token —— 表现是「桌面版打开就停在登录页」，
+    #: 而 Web 部署（浏览器里输密码）却正常，很容易误判成新面板的 bug。
+    #:
+    #: 安全前提（必须保留，否则等于任何人可免密）：
+    #:   1. 当前 URL 必须是 **127.0.0.1 回环** + **本进程的端口**
+    #:   2. 路径必须命中白名单前缀
+    _DESKTOP_LOGIN_PREFIXES = ("/admin", "/panel")
+
+    def _desktop_login_allowed(self) -> bool:
+        """校验「当前窗口确实停在本机桌面界面上」。"""
+        try:
+            url = self.window.get_current_url() or ""
+        except Exception:      # noqa: BLE001 窗口已销毁 → 一律拒绝
+            return False
+        from urllib.parse import urlparse
+        u = urlparse(url)
+        # ① 回环 + 本进程端口（防 DNS rebinding / 误连别的服务）
+        if (u.scheme or "http").lower() not in ("http", "https"):
+            return False
+        if (u.hostname or "").lower() not in ("127.0.0.1", "localhost", "::1"):
+            return False
+        if self.port and u.port not in (None, self.port):
+            return False
+        # ② 路径白名单（允许尾随斜杠与查询串）
+        path = (u.path or "/").rstrip("/") or "/"
+        return any(path == p or path.startswith(p + "/")
+                   for p in self._DESKTOP_LOGIN_PREFIXES)
+
     def desktop_login(self):
-        if self.window.get_current_url() != f"http://127.0.0.1:{self.port}/admin?desktop=1":
+        if not self.port:
+            # 后台还没起来：明确报「稍等」而不是「不允许登录」，
+            # 否则用户会以为权限配置错了。
+            raise RuntimeError("本地服务还在启动，请稍候再试")
+        if not self._desktop_login_allowed():
             raise RuntimeError("只允许本地桌面界面登录")
         from datetime import datetime, timedelta, timezone
         import jwt
@@ -303,7 +346,7 @@ class DesktopAPI:
                         if not json.load(response).get("ready"):
                             continue
                     save_port(self.base, self.config, self.port)
-                    self.window.load_url(f"http://127.0.0.1:{self.port}/admin?desktop=1")
+                    self.window.load_url(self._landing_url())
                     if os.getenv("WB_DESKTOP_SMOKE"):
                         threading.Thread(target=self._smoke_test, daemon=True).start()
                     return
@@ -322,6 +365,26 @@ class DesktopAPI:
                 pass
         finally:
             self.start_lock.release()
+
+    def _landing_url(self) -> str:
+        """桌面端启动后打开的地址。
+
+        由 **`ADMIN_DEFAULT_PANEL` 决定**（原来硬编码 `/admin?desktop=1`）：
+        这样「切到新面板」只需改一个环境变量，桌面端自动跟着走，不必改代码。
+
+            ADMIN_DEFAULT_PANEL=legacy（默认）→ /admin?desktop=1   旧面板
+            ADMIN_DEFAULT_PANEL=next          → /panel?desktop=1   新面板
+
+        `?desktop=1` 两个面板都保留：旧面板靠它显示「本地运行」标识，
+        新面板用它决定是否走 `pywebview.api.desktop_login()` 免密引导。
+        """
+        panel = (os.getenv("ADMIN_DEFAULT_PANEL") or "legacy").strip().lower()
+        if panel == "next":
+            path = (os.getenv("ADMIN_PANEL_PATH") or "/panel").strip() or "/panel"
+            if not path.startswith("/"):
+                path = "/" + path
+            return f"http://127.0.0.1:{self.port}{path.rstrip('/')}?desktop=1"
+        return f"http://127.0.0.1:{self.port}/admin?desktop=1"
 
     def _smoke_test(self):
         result = {"ok": False, "version": VERSION, "port": self.port}
