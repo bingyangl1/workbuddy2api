@@ -320,6 +320,17 @@ MUTATIONS: list[Mutation] = [
         why="写死国内镜像 → GitHub Actions（海外 runner）连它 ReadTimeout",
         tags=["android", "ci"],
     ),
+    # ── 签名脚本的临时目录（CI runner 的 ACL 限制）──────────────────
+    Mutation(
+        name="sign-uses-system-temp",
+        file="scripts/sign_release.py",
+        old="    with _work_dir(\"wb-sign-\") as td:",
+        new="    with tempfile.TemporaryDirectory(prefix=\"wb-sign-\") as td:",
+        tests=["tests/test_sign_release.py::WorkDirCase"],
+        why="用系统 TEMP → GitHub Actions 的 Windows runner 上 ACL 是"
+            "\\OWNER RIGHTS，ssh-keygen 直接拒绝签名（本地复现不了）",
+        tags=["sign", "ci"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

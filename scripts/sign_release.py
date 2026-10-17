@@ -104,9 +104,43 @@ def _materialize_key(spec: str, tmp: Path) -> Path:
     return target
 
 
+def _work_dir(prefix: str):
+    """给临时目录挑一个好位置（`ssh-keygen` 对 ACL 很挑）。
+
+    ## 为什么不能直接用系统 TEMP
+
+    Windows 上 `%TEMP%` 的 ACL 常常是 `\\OWNER RIGHTS`（S-1-3-4）或带 8.3
+    短名（`C:/Users/RUNNER~1/...`）。`ssh-keygen -Y sign` 会直接拒绝：
+
+        [FAIL] pack.exe: Bad permissions. Try removing permissions for
+        user: \\OWNER RIGHTS (S-1-3-4) on file .../signing_key
+
+    这条错误在 GitHub Actions 的 Windows runner 上**必然出现**，
+    在普通开发机上却复现不了（本地 TEMP 的 ACL 正常）。
+
+    ## 策略
+
+    优先用环境变量 `WB_SIGN_TMPDIR`（CI 可以指到 workspace 内），
+    否则用「脚本所在仓库」下的目录 —— 它继承正常 ACL，
+    且不污染用户系统 TEMP。
+    """
+    base = os.getenv("WB_SIGN_TMPDIR")
+    if base:
+        p = Path(base)
+        p.mkdir(parents=True, exist_ok=True)
+        return tempfile.TemporaryDirectory(prefix=prefix, dir=str(p))
+    repo_tmp = Path(__file__).resolve().parent.parent / ".sign_tmp"
+    try:
+        repo_tmp.mkdir(exist_ok=True)
+        return tempfile.TemporaryDirectory(prefix=prefix, dir=str(repo_tmp))
+    except OSError:
+        # 仓库目录不可写（只读挂载等）→ 退回系统 TEMP
+        return tempfile.TemporaryDirectory(prefix=prefix)
+
+
 def sign(files: list[Path], key_spec: str) -> int:
     keygen = _ssh_keygen()
-    with tempfile.TemporaryDirectory(prefix="wb-sign-") as td:
+    with _work_dir("wb-sign-") as td:
         tmp = Path(td)
         key = _materialize_key(key_spec, tmp)
         failed = 0
@@ -150,7 +184,7 @@ def verify(files: list[Path], pubkey: Path) -> int:
     if not pubkey.is_file():
         raise SystemExit(f"公钥不存在：{pubkey}")
     failed = 0
-    with tempfile.TemporaryDirectory(prefix="wb-verify-") as td:
+    with _work_dir("wb-verify-") as td:
         allowed = _allowed_signers(pubkey, Path(td))
         for f in files:
             sig = Path(str(f) + ".sig")

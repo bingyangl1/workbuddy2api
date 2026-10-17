@@ -151,3 +151,6 @@ scripts/_fulltest.json
 
 # 签名测试的临时目录（ssh-keygen 需要正常 ACL 的目录）
 /.pytest_sign_tmp/
+
+# 签名脚本的临时目录（ssh-keygen 对 TEMP 的 ACL 很挑，见 sign_release._work_dir）
+/.sign_tmp/

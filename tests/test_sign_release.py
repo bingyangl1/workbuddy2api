@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -264,6 +265,73 @@ class WorkflowWiringCase(unittest.TestCase):
     def test_gitignore_keeps_signing_script(self):
         gi = (Path(__file__).resolve().parent.parent / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("!scripts/sign_release.py", gi)
+
+
+class WorkDirCase(unittest.TestCase):
+    """签名脚本的临时目录不能放系统 TEMP。
+
+    ## 为什么（真实的 CI 失败）
+
+    Windows 上 `%TEMP%` 的 ACL 常是 `\\OWNER RIGHTS`（S-1-3-4）或带 8.3 短名，
+    `ssh-keygen -Y sign` 直接拒绝：
+
+        [FAIL] pack.exe: Bad permissions. Try removing permissions for
+        user: \\OWNER RIGHTS (S-1-3-4) on file .../signing_key
+
+    GitHub Actions 的 Windows runner 上**必然出现**，本地开发机复现不了
+    （本地 TEMP 的 ACL 正常）—— 典型的「只有 CI 才暴露」。
+
+    所以 `sign()` / `verify()` 都改走 `_work_dir()`。
+    """
+
+    def test_work_dir_not_system_temp(self):
+        """默认位置应在仓库内，而不是系统 TEMP。"""
+        with S._work_dir("wb-test-") as td:
+            p = Path(td).resolve()
+        sys_tmp = Path(tempfile.gettempdir()).resolve()
+        self.assertFalse(
+            str(p).startswith(str(sys_tmp)),
+            f"临时目录 {p} 在系统 TEMP（{sys_tmp}）下 —— "
+            "ssh-keygen 在 CI runner 上会因 ACL 拒绝")
+
+    def test_work_dir_honors_env(self):
+        """支持 `WB_SIGN_TMPDIR` 覆盖（CI 可指到 workspace 内）。"""
+        custom = Path(__file__).resolve().parent.parent / ".sign_tmp_env"
+        with mock.patch.dict(os.environ, {"WB_SIGN_TMPDIR": str(custom)}):
+            with S._work_dir("wb-test-") as td:
+                p = Path(td).resolve()
+        self.assertTrue(str(p).startswith(str(custom.resolve())),
+                        f"未采纳 WB_SIGN_TMPDIR：{p}")
+        shutil.rmtree(custom, ignore_errors=True)
+
+    def test_sign_and_verify_use_work_dir(self):
+        """`sign()` / `verify()` 必须真的走 `_work_dir`（不能又用回 TEMP）。
+
+        注意 `_work_dir()` **内部**有一处系统 TEMP 兜底
+        （仓库目录不可写时用，如只读挂载）—— 那是合法的，
+        所以这里只检查 `_work_dir` 定义之外的代码。
+        """
+        src = SCRIPT.read_text(encoding="utf-8")
+        # 切出 _work_dir 函数体，排除它
+        i = src.find("def _work_dir(")
+        self.assertGreater(i, 0, "应有 _work_dir 函数")
+        j = src.find("\ndef ", i + 10)
+        body = src[i:j] if j > 0 else src[i:]
+        rest = src[:i] + (src[j:] if j > 0 else "")
+
+        bare_in_rest = [ln.strip() for ln in rest.splitlines()
+                        if "TemporaryDirectory(prefix=" in ln
+                        and "dir=" not in ln]
+        self.assertEqual(
+            bare_in_rest, [],
+            f"`_work_dir` 之外还有地方用系统 TEMP（ssh-keygen 会因 ACL 拒绝）："
+            f"{bare_in_rest}")
+
+        # sign / verify 都应该调 _work_dir
+        self.assertIn("_work_dir(", rest,
+                      "sign()/verify() 应通过 `_work_dir()` 建临时目录")
+        self.assertNotIn("TemporaryDirectory(prefix=\"wb-sign-\"", rest)
+        self.assertNotIn("TemporaryDirectory(prefix=\"wb-verify-\"", rest)
 
 
 if __name__ == "__main__":
