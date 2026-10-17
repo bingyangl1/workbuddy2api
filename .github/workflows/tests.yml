@@ -1,0 +1,93 @@
+name: tests
+
+# 每次 push / PR 都跑全量测试 + 反向验证。
+#
+# ## 为什么要单独一个工作流
+#
+# `desktop-release.yml` 只在打 tag 时跑，而且只覆盖桌面端相关的测试。
+# 日常改动的回归保护需要一个「每次提交都跑」的工作流。
+#
+# ## 反向验证（verify_tests.py）为什么进 CI
+#
+# 它检查的是「**测试是否真的能抓到 bug**」。本项目已经踩过 9 次假绿
+# （测试通过，但把实现改坏了它照样通过）。这类问题正向测试**永远发现不了**：
+#
+#   * 只测了纯函数，把真实调用删掉照样过
+#   * 断言写成了「源码里有某字样」，而 import 行里也有那个字样
+#   * mock 没真正制造竞态，无条件写入也能通过
+#
+# 反向验证把实现故意改坏，断言测试必须变红 —— 这是唯一能发现假绿的办法。
+#
+# ## 安全：它碰不到上游
+#
+# 本工作流**不启动引擎、不发任何 HTTP 请求到腾讯/WorkBuddy**。
+# `verify_tests.py` 只做两件事：改本地文件 + 跑 pytest。
+# 测试本身也全是 mock 的（已审计：整套测试零真实上游调用）。
+# 另外工作流里显式设置了 `ADMIN_UPSTREAM_READONLY_ALL=1` 作为兜底。
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # 兜底：即便哪天测试真的发起了上游调用，也会被护栏挡成 403。
+      # 详见 admin/security.py::is_upstream_touch
+      ADMIN_UPSTREAM_READONLY: '1'
+      ADMIN_UPSTREAM_READONLY_ALL: '1'
+      ADMIN_JWT_SECRET: 'ci-placeholder-secret-not-used-anywhere'
+      # SQLite 内存库：不需要任何外部服务（MySQL/Redis 都不装）
+      ADMIN_DATABASE_URL: 'sqlite:///:memory:'
+      ADMIN_GATEWAY_LIMIT_BACKEND: 'memory'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Run full test suite
+        run: python -m pytest tests/ -q
+
+  verify-tests:
+    # 反向验证：确认测试真的能抓到 bug（防假绿）。
+    #
+    # 与 pytest 分开跑，因为它是「故意改坏代码」的 —— 失败了要能一眼看出
+    # 是「测试不灵」而不是「代码有 bug」。
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: pytest
+    env:
+      ADMIN_UPSTREAM_READONLY: '1'
+      ADMIN_UPSTREAM_READONLY_ALL: '1'
+      ADMIN_JWT_SECRET: 'ci-placeholder-secret-not-used-anywhere'
+      ADMIN_DATABASE_URL: 'sqlite:///:memory:'
+      ADMIN_GATEWAY_LIMIT_BACKEND: 'memory'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Verify tests actually catch bugs
+        # `--check`：有任何假绿就以非 0 退出
+        run: python scripts/verify_tests.py --check

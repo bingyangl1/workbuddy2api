@@ -76,6 +76,8 @@ scripts/*.py
 !scripts/security_baseline.py
 !scripts/panel_smoke_test.py
 !scripts/sign_release.py
+# 反向验证工具（防测试假绿）：测试基础设施，属于产品级
+!scripts/verify_tests.py
 
 # ===== 强制保留（即便以点开头也要提交） =====
 !.gitignore

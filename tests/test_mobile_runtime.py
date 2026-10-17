@@ -211,13 +211,23 @@ class MobileLayoutCase(unittest.TestCase):
                       "窄屏应隐藏常驻侧边栏并显示汉堡按钮")
 
     def test_drawer_is_portal(self):
-        """抽屉必须 portal 到 body。
+        """抽屉必须**真的** portal 到 body（不只是 import 了 createPortal）。
 
-        渲染在 sticky + backdrop-blur 的 header 内部时，`fixed inset-0`
-        的高度会退化成 header 的高度（实测只有 52px，菜单全在视口外）。
+        ## 为什么这条测试要写得这么绕
+
+        早先只断言「源码里有 `createPortal` 字样」。反向验证发现：把真正的
+        `createPortal(drawer, document.body)` 删掉，**`import {createPortal}`
+        那行还在** → 断言依然成立 → 假绿。
+
+        现在检查的是**调用表达式**本身，而不是这个词出现过。
         """
-        self.assertIn("createPortal", self.sidebar,
-                      "抽屉必须 portal 到 body，否则高度塌成 header 高度")
+        import re
+        # 必须存在 `createPortal(xxx, document.body)` 这样的实际调用
+        self.assertRegex(
+            self.sidebar,
+            r"createPortal\([^,]+,\s*document\.body\)",
+            "抽屉必须真的调用 createPortal(..., document.body)，"
+            "仅仅 import 了 createPortal 不算")
 
 
 class NoServerComponentDependencyCase(unittest.TestCase):

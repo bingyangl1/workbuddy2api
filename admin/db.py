@@ -69,8 +69,45 @@ def _sqlite_ensure_parent_dir(url: str) -> None:
 if settings.DATABASE_URL.startswith("sqlite"):
     _sqlite_ensure_parent_dir(settings.DATABASE_URL)
 
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, pool_recycle=3600,
-                        pool_timeout=30, pool_size=20, max_overflow=40, future=True)
+
+def _engine_kwargs(url: str) -> dict:
+    """按数据库类型给 `create_engine` 挑参数。
+
+    ## 为什么必须分开
+
+    `pool_size` / `max_overflow` / `pool_timeout` 是 **QueuePool** 的参数。
+    SQLite 用的是 `SingletonThreadPool`（文件库）或 `StaticPool`（内存库），
+    它们**不接受**这些参数 —— 传了会直接抛：
+
+        TypeError: Invalid argument(s) 'pool_timeout', 'pool_size',
+                   'max_overflow' for this Pool.
+
+    实测踩过：CI 里用 `sqlite:///:memory:` 时整个应用**起不来**。
+    而 SQLite 恰恰是 PC / 安卓 / 单机部署的默认选择 —— 等于「最该能跑的场景
+    一启动就崩」。
+
+    ## SQLite 的取舍
+
+    * 文件库：默认 `SingletonThreadPool` 可用；并发靠 WAL + busy_timeout 兜。
+    * 内存库（测试）：必须 `StaticPool` + `check_same_thread=False`，
+      否则每个连接看到的是**不同的**内存库（测试会莫名其妙丢数据）。
+    """
+    if url.startswith("sqlite"):
+        kwargs: dict = {"pool_pre_ping": True, "future": True}
+        if ":memory:" in url or url.rstrip("/") == "sqlite:":
+            # 内存库：所有连接共享同一份（否则每次 connect 都是空的）
+            from sqlalchemy.pool import StaticPool
+            kwargs["poolclass"] = StaticPool
+            kwargs["connect_args"] = {"check_same_thread": False}
+        return kwargs
+    return {
+        "pool_pre_ping": True, "pool_recycle": 3600,
+        "pool_timeout": 30, "pool_size": 20, "max_overflow": 40,
+        "future": True,
+    }
+
+
+engine = create_engine(settings.DATABASE_URL, **_engine_kwargs(settings.DATABASE_URL))
 if engine.dialect.name == "sqlite":
     @event.listens_for(engine, "connect")
     def _sqlite_pragmas(connection, _record):

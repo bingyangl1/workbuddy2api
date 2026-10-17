@@ -366,11 +366,64 @@ class SmokeTestBothPanelsCase(unittest.TestCase):
         self.assertIn("classList.contains('hidden')", self.body)
 
     def test_checks_modern_panel(self):
-        """新面板：必须有自己的判据，否则 next 构建冒烟必挂。"""
-        self.assertIn("__reactFiber", self.body,
-                      "新面板判据应检查 React 是否已挂载")
-        self.assertIn("innerText", self.body,
-                      "新面板判据应检查页面有实际内容")
+        """新面板：判据必须**真的能返回 true**，而不只是提到相关字样。
+
+        ## 为什么这条写得这么严
+
+        早先只断言「源码里有 `__reactFiber` / `innerText` 字样」。
+        反向验证发现：把判据里的 `var n=0;` 改成 `return false;`
+        （让它永不通过），那两个字样**还在源码里** → 断言依然成立 → 假绿。
+
+        现在改为：从源码里**抽出那段 JS**，用 node 真跑一遍，
+        断言它在「React 已挂载 + 有内容」的模拟页面里返回 true。
+        """
+        import re
+        m = re.search(r'modern_expr\s*=\s*\((.*?)\n\s*\)\n', self.body, re.S)
+        self.assertIsNotNone(m, "未能从源码里抽出 modern_expr")
+
+        # 把 Python 字符串拼接还原成真正的 JS
+        parts = re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
+        js = "".join(p.encode().decode("unicode_escape") for p in parts)
+        self.assertIn("__reactFiber", js, "判据里应检查 React 挂载")
+        self.assertIn("innerText", js, "判据里应检查页面内容")
+
+        # 用 node 真跑：模拟一个「React 已挂载 + 有内容」的页面
+        #
+        # ⚠️ 必须写成**文件**再 `node <file>`：把整段 JS 塞进 `node -e "..."`
+        # 时，引号/换行在 Windows 下会被 shell 层吃掉，导致语法错误
+        # （实测：`[eval]:1` 报错，误判成「判据返回 falsy」）。
+        import shutil
+        import subprocess
+        import tempfile
+
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("环境没有 node，跳过 JS 行为验证")
+
+        harness = (
+            "globalThis.location={pathname:'/panel/login/'};\n"
+            "globalThis.document={body:{innerText:'x'.repeat(120)},\n"
+            "  querySelectorAll:()=>[{__reactFiber$abc:1}]};\n"
+            f"const r=({js});\n"
+            "process.exit(r?0:3);\n"
+        )
+        fd, tmp = tempfile.mkstemp(suffix=".js", prefix="smoke_probe_")
+        try:
+            with open(fd, "w", encoding="utf-8") as fh:
+                fh.write(harness)
+            proc = subprocess.run([node, tmp], capture_output=True, timeout=30)
+        finally:
+            import os as _os
+            try:
+                _os.unlink(tmp)
+            except OSError:
+                pass
+
+        self.assertEqual(
+            proc.returncode, 0,
+            "**modern 判据在「React 已挂载 + 有内容」的页面上必须返回 true** —— "
+            f"实际返回 falsy（rc={proc.returncode}）。"
+            f"stderr: {proc.stderr.decode('utf-8', 'ignore')[:300]}")
 
     def test_modern_does_not_require_login(self):
         """**冒烟测试不该要求已登录**（这是实测踩出来的）。

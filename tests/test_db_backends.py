@@ -104,6 +104,51 @@ class EngineCreationCase(unittest.TestCase):
         self.assertIn("create_engine(settings.DATABASE_URL", self.src,
                       "引擎必须从配置读 URL（不能写死 MySQL）")
 
+    def test_pool_args_differ_by_dialect(self):
+        """**连接池参数必须按方言分开**（真实的启动崩溃点）。
+
+        `pool_size` / `max_overflow` / `pool_timeout` 是 QueuePool 的参数。
+        SQLite 用 SingletonThreadPool（文件库）或 StaticPool（内存库），
+        它们不接受这些参数 —— 传了直接抛：
+
+            TypeError: Invalid argument(s) 'pool_timeout', 'pool_size',
+                       'max_overflow' for this Pool.
+
+        实测踩过：CI 用 `sqlite:///:memory:` 时整个应用起不来。
+        而 SQLite 正是 PC / 安卓 / 单机部署的默认选择 ——
+        等于「最该能跑的场景一启动就崩」。
+
+        ⚠️ 断言必须**去掉注释/文档串**再查：`_engine_kwargs` 的 docstring 里
+        就举了这些参数名当反面教材，直接搜全文会假失败（本轮踩过）。
+        """
+        self.assertIn("def _engine_kwargs", self.src,
+                      "应有按方言挑连接池参数的函数")
+        i = self.src.find("def _engine_kwargs")
+        j = self.src.find("\nengine =", i)
+        raw = self.src[i:j] if j > 0 else self.src[i:i + 2400]
+
+        # 去掉三引号文档串与 # 注释，只留可执行代码
+        import re
+        code = re.sub(r'""".*?"""', "", raw, flags=re.S)
+        code = re.sub(r"#[^\n]*", "", code)
+
+        sqlite_part = code[:code.find("return {")] if "return {" in code else code
+        for bad in ("pool_size", "max_overflow", "pool_timeout"):
+            self.assertNotIn(bad, sqlite_part,
+                             f"SQLite 分支不能传 {bad}（会抛 TypeError）")
+        mysql_part = code[code.find("return {"):]
+        self.assertIn("pool_size", mysql_part,
+                      "MySQL 分支应保留连接池配置")
+
+    def test_memory_sqlite_uses_static_pool(self):
+        """内存库必须用 StaticPool —— 否则每个连接是**不同的**空库。"""
+        i = self.src.find("def _engine_kwargs")
+        body = self.src[i:i + 2200]
+        self.assertIn("StaticPool", body,
+                      "内存 SQLite 必须用 StaticPool + check_same_thread=False，"
+                      "否则各连接看到不同的内存库（测试会莫名丢数据）")
+        self.assertIn("check_same_thread", body)
+
     def test_sqlite_file_parent_dir_created(self):
         """SQLite 的父目录不存在时启动会失败 —— 应自动创建。"""
         self.assertTrue(
@@ -122,9 +167,27 @@ class SqliteParentDirBehaviorCase(unittest.TestCase):
 
     这是 PC / 安卓端的典型场景 —— 用户随便选个路径，父目录大概率不存在。
 
-    注意：直接调 `_sqlite_ensure_parent_dir()` 而不是重载 `admin.db`
-    模块 —— 重载会创建新的 engine，污染其它测试（踩过）。
+    ## 两条不同的断言，缺一不可
+
+    1. **函数本身能用** —— 直接调 `_sqlite_ensure_parent_dir()` 建目录
+    2. **函数真的被调用** —— 检查 `db.py` 模块级有没有在 sqlite URL 下调用它
+
+    只测第 1 条会假绿：把「启动时调用它」那一行删掉，函数还在、测试照过，
+    但**首次启动依然会 `unable to open database file`**。
+    反向验证就是靠这个抓到假绿的。
     """
+
+    def test_helper_called_at_import_for_sqlite(self):
+        """模块级必须有「sqlite URL → 调 _sqlite_ensure_parent_dir」的接线。"""
+        import re
+        src = DBPY.read_text(encoding="utf-8")
+        self.assertRegex(
+            src,
+            r'if\s+settings\.DATABASE_URL\.startswith\(\s*["\']sqlite["\']\s*\)'
+            r'\s*:\s*\n\s*_sqlite_ensure_parent_dir\(settings\.DATABASE_URL\)',
+            "**必须在模块级调用 `_sqlite_ensure_parent_dir`** —— "
+            "只定义函数不调用，首次启动仍会 unable to open database file"
+            "（这是被反向验证抓出来的假绿）")
 
     def test_nested_dir_auto_created(self):
         import shutil

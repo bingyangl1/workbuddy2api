@@ -110,9 +110,35 @@ _UPSTREAM_WRITE_ACCOUNT_SUB = ("/refresh", "/inject", "/cat-travel")
 #: schedules 立即运行内置任务（部分任务打上游）：/{sid}/run
 _UPSTREAM_WRITE_SCHEDULE_SUB = ("/run",)
 
+#: **只读但仍会打上游**的管理面路由（只用于 `ADMIN_UPSTREAM_READONLY_ALL=1`
+#: 的严格模式，见 `is_upstream_touch`）。
+#:
+#: 为什么单独列一份而不并进上面那个：两者语义不同。
+#:
+#:   * 上面那批 = **改变上游状态或消耗额度**（领取、做任务、测速）
+#:     → `ADMIN_UPSTREAM_READONLY=1` 就该挡
+#:   * 这一批 = **只读查询**
+#:     → 平时应当允许（否则测试期没法验证 UI），
+#:       但自动化/反向验证场景要能**彻底断开上游**，所以要单独一级开关
+#:
+#: 只读查询虽然不改状态，**但频次高了仍然计入上游调用**，
+#: 对「多跑会被检测」的场景同样有风险 —— 这就是需要严格模式的理由。
+_UPSTREAM_READ_ROUTES = (
+    "/api/benefits/query",               # 查询可领权益（compensation-status）
+    "/api/benefits/claim",               # 领取前的状态查询也走这里
+    "/api/accounts/credits/sync",        # 全量刷新（读上游余额与积分包）
+    "/api/models/sync",                  # 读上游模型列表
+    "/api/accounts/refresh/preview",     # 刷新预览（只读）
+)
+#: accounts 下的只读上游调用：/{id}/refresh 的 dry-run、余额查询等
+_UPSTREAM_READ_ACCOUNT_SUB = ("/refresh", "/credits", "/balance")
+
 
 def is_upstream_write(method: str, path: str) -> bool:
-    """判定该管理面请求是否会真实触达上游。供测试护栏中间件与审计共用。"""
+    """判定该管理面请求是否会**改变上游状态 / 消耗额度**。
+
+    供测试护栏中间件与审计共用。对应 `ADMIN_UPSTREAM_READONLY=1`。
+    """
     if method.upper() != "POST":
         return False
     if any(path.startswith(p) for p in _UPSTREAM_WRITE_ROUTES):
@@ -120,6 +146,34 @@ def is_upstream_write(method: str, path: str) -> bool:
     if path.startswith("/api/accounts/") and path.endswith(_UPSTREAM_WRITE_ACCOUNT_SUB):
         return True
     if path.startswith("/api/schedules/") and path.endswith(_UPSTREAM_WRITE_SCHEDULE_SUB):
+        return True
+    return False
+
+
+def is_upstream_touch(method: str, path: str) -> bool:
+    """判定该管理面请求是否会**以任何形式触达上游**（含只读查询）。
+
+    对应 `ADMIN_UPSTREAM_READONLY_ALL=1` 的严格模式。
+
+    ## 为什么需要比 `is_upstream_write` 更严的一级
+
+    `ADMIN_UPSTREAM_READONLY=1` 只挡「写」。这对人工核验够用（只读查询
+    本来就是安全的），但对**自动化 / 反向验证**不够：
+
+      * 反向验证要反复跑、改坏代码再跑 —— 任何真实调用都会被放大
+      * CI 里不该有任何真实上游流量
+      * 「只读」不等于「零风险」：查询频次高了同样计入上游调用，
+        而成长/权益类活动对**重复访问**是有检测的
+
+    因此提供这一级开关，让自动化可以**物理上断开上游**。
+    """
+    if is_upstream_write(method, path):
+        return True
+    if method.upper() not in ("GET", "POST"):
+        return False
+    if any(path.startswith(p) for p in _UPSTREAM_READ_ROUTES):
+        return True
+    if path.startswith("/api/accounts/") and path.endswith(_UPSTREAM_READ_ACCOUNT_SUB):
         return True
     return False
 

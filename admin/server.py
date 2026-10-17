@@ -26,6 +26,7 @@ from admin.ratelimit import (clear_failures, get_client_ip, get_trusted_client_i
 from admin.security import (
     create_admin_token,
     hash_password,
+    is_upstream_touch,
     is_upstream_write,
     require_admin,
     verify_password,
@@ -126,13 +127,36 @@ async def _security_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def _upstream_readonly_guard(request: Request, call_next):
-    """上游只读测试护栏（ADMIN_UPSTREAM_READONLY=1 时启用）。
+    """上游只读测试护栏。两级开关：
 
-    拦截管理面里会真实触达上游腾讯/WorkBuddy 的写操作（做成长任务/领奖/
-    强制刷新余额/测速/同步模型/token 注入/猫猫旅行/定时任务立即运行），
-    返回 403，避免测试/截图核验误伤账号。本地 DB CRUD 与 /v1 /gw 网关
-    转发一律放行。
+        ADMIN_UPSTREAM_READONLY=1      → 只挡**写**（默认测试用法）
+        ADMIN_UPSTREAM_READONLY_ALL=1  → 连**只读查询**也挡（自动化专用）
+
+    ## 为什么需要 ALL 这一级
+
+    `READONLY=1` 只挡「会改变上游状态或消耗额度」的操作（做成长任务 / 领奖 /
+    测速 / 同步模型 / 签到 / 领取权益），只读查询仍然放行 —— 人工核验 UI 时
+    需要它。
+
+    但**自动化 / 反向验证**不该有任何真实上游流量：
+
+      * 反向验证要反复跑（改坏代码再跑），任何真实调用都会被放大
+      * 「只读」不等于零风险 —— 查询频次高了同样计入上游调用，
+        而成长/权益类活动对重复访问是有检测的
+      * CI 里出现真实上游请求本身就是错的
+
+    所以 ALL 级别让自动化可以**物理上断开上游**，不靠人记得别点。
+
+    本地 DB CRUD 与 `/v1` `/gw` 网关转发一律放行（网关是业务流量）。
     """
+    if settings.UPSTREAM_READONLY_ALL and is_upstream_touch(
+            request.method, request.url.path):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "上游完全隔离模式（ADMIN_UPSTREAM_READONLY_ALL=1），"
+                               "任何触达上游的操作（含只读查询）均被拦截"},
+        )
     if settings.UPSTREAM_READONLY and is_upstream_write(
             request.method, request.url.path):
         from fastapi.responses import JSONResponse

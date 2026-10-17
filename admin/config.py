@@ -107,6 +107,22 @@ class Settings:
     #: 分组/配置/审计清理等不触上游）也照常放行。
     UPSTREAM_READONLY = os.getenv("ADMIN_UPSTREAM_READONLY", "0") == "1"
 
+    #: **严格版**上游隔离：连「只读查询」也挡掉。
+    #:
+    #:     ADMIN_UPSTREAM_READONLY=1      → 挡写操作，允许只读查询（人工核验用）
+    #:     ADMIN_UPSTREAM_READONLY_ALL=1  → 任何触达上游的请求都挡（自动化用）
+    #:
+    #: 为什么要单独一级：`READONLY=1` 放行的只读查询（查询可领权益、同步模型、
+    #: 刷新余额预览）**确实会打上游**。人工点一次没问题，但自动化场景不能接受：
+    #:
+    #:   * 反向验证要反复跑（注入 bug → 跑测试 → 还原），任何真实调用都会被放大
+    #:   * 「只读」不等于零风险 —— 查询频次高了同样计入上游调用，
+    #:     而成长/权益类活动对重复访问是有检测的
+    #:   * CI 里出现真实上游流量本身就是错的
+    #:
+    #: 设了它之后，自动化**物理上**碰不到上游，不靠人记得别点。
+    UPSTREAM_READONLY_ALL = os.getenv("ADMIN_UPSTREAM_READONLY_ALL", "0") == "1"
+
     # ---------- 默认面板切换（P3 收尾） ----------
     #: 默认管理面板用哪个。`legacy`（默认）= 旧面板（admin/static/index.html，
     #: 平价验收 100% 前的稳妥项）；`next` = 新面板（web/out，PANEL_STATIC=1 时
