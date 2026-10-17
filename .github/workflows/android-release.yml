@@ -174,9 +174,24 @@ jobs:
       # 各路由模块、错误码数据，且**没有**凭证/数据库/密钥。
       - name: Verify APK actually contains our code
         run: |
+          set -euo pipefail
+          # 先确认 APK 真的存在 —— `cp` 失败时 `set -e` 会立刻退出，
+          # 而不是让后面的 pytest 因为「找不到 APK」全靠 skip 而假通过。
+          echo "=== dist/android ==="
+          ls -la dist/android/
           mkdir -p _apkcheck
           cp dist/android/*.apk _apkcheck/
-          python -m pytest tests/test_apk_content.py -q
+          echo "=== _apkcheck ==="
+          ls -la _apkcheck/
+          # 断言至少有一个 APK 被拷过来（防止 skip 掩盖问题）
+          count=$(find _apkcheck -name '*.apk' | wc -l)
+          echo "APK 数量: $count"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::没有找到 APK，无法验证产物"
+            exit 1
+          fi
+          # WB_REQUIRE_APK=1：让测试在找不到 APK 时**失败而非跳过**
+          WB_REQUIRE_APK=1 python -m pytest tests/test_apk_content.py -q
 
       - uses: actions/upload-artifact@v4
         with:

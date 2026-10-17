@@ -68,6 +68,14 @@ class ApkContentCase(unittest.TestCase):
     def setUpClass(cls):
         cls.apk = _find_apk()
         if cls.apk is None:
+            # 本地开发通常没有 APK（要 CI 构建），跳过是合理的。
+            # **但 CI 里必须明确要求**：设置 WB_REQUIRE_APK=1 时，
+            # 找不到 APK 视为失败 —— 否则「全 skip」会被当成通过，
+            # 整个产物验证形同虚设（这类"假通过"已经在项目里踩过多次）。
+            if os.getenv("WB_REQUIRE_APK") == "1":
+                raise AssertionError(
+                    "WB_REQUIRE_APK=1 但没找到 APK —— "
+                    "产物验证不能以「跳过」收场")
             raise unittest.SkipTest(
                 "本地没有 APK（CI 上从 Artifacts 取），跳过产物解剖")
         cls.names = _inner_names(cls.apk, "assets/chaquopy/app.imy")
