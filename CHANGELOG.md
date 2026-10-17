@@ -54,6 +54,48 @@
 - **上游只读护栏**：`ADMIN_UPSTREAM_READONLY=1` 时所有触上游的写操作（做任务/领奖/强制刷新/测速/同步模型/token 注入/猫猫旅行/定时任务立即运行/测试台直调）统一 403；本地 CRUD、GET、`/v1` `/gw` 转发一律放行。防测试误伤真实账号。
 - **私有材料隔离校验**：`_relkey/`（发布签名私钥）与 `_extracted_keys.json`（逆向产物密钥）在 `.gitignore` 且**永不被 git 跟踪**（有测试守护）。
 
+### 本轮新增（P6 收尾 + 上游 1.0.5 跟进 + 全端打包）
+
+#### 新增
+
+- **桌面端接入新面板（P6）**：`ADMIN_DEFAULT_PANEL=next` 时桌面版打开 `/panel`；免密登录由本地启动器签发 token 经 bridge 传递，三道约束（loopback + 端口 + 路径前缀）外加一次性 boot nonce。**踩过的三层坑**：① `?desktop=1` 会被静态导出重定向剥掉 → 改判 bridge 是否存在；② PyWebView 的 `js_api` 回调表在导航时销毁 → Promise 永不 settle → 所有桥调用加 `Promise.race` 超时；③ 桥可能晚于 4.5s 注入 → 去掉提前放弃。
+- **版本与更新 UI**：侧边栏版本按钮 + 双模式更新对话框（桥调用 / 浏览器直连 `systemApi.releases()`）；`<pre>` 纯文本渲染 release body（不用 `dangerouslySetInnerHTML`）；链接做前缀守卫。
+- **限时权益 / 补偿领取**（吸收上游 `c8d816d`+`98e5a93`+`eb0b1a1`，三合一自行实现）：`/benefits` 页面 + 4 个端点。**只能手动运行** —— 4 条硬约束：不在 `TASK_CHOICES`、数据库唯一约束、领取前必须先查、失败不置 claimed。状态 `unknown` 永不领取。
+- **跨进程租约**（吸收上游思路，只取 ~90 行能力）：`admin/growth_lease.py` 基于 `SystemSetting` 表做 CAS 租约，默认 TTL 600s。防多实例重复执行同一账号任务（典型风控触发场景）。
+- **成长执行审计**：`GrowthRunRecord` 表记录每次运行的账号/任务/结果/来源；`GET /api/growth/records` 查询。
+- **147 条上游错误码中文解释**（跟随上游 1.0.5）：`admin/data/upstream_error_messages.json` + `admin/upstream_errors.py`。**只做解释不做决策** —— 解释文案可随客户端更新，决策仍基于我们对账号池的理解。接进 `_exhaustion_message()`，未知 code 不编造任何内容。
+- **两级上游护栏**：`ADMIN_UPSTREAM_READONLY=1`（挡写）/ `ADMIN_UPSTREAM_READONLY_ALL=1`（连只读也挡，自动化专用）。后者为反向验证/CI 提供「物理上碰不到上游」的保证。
+- **反向验证工具** `scripts/verify_tests.py`：34 条声明式 mutation，流程「注入 bug → pytest 必须红 → 还原 → 必须绿」。可进 CI（`--check`）。
+- **CI 工作流**：`tests.yml`（每次 push/PR 跑全量 + 反向验证）、`android-release.yml`（APK 构建 + 产物解剖 + Release 发布）。
+- **安卓 APK 打包**：移植上游 `35d7ce0` 的 Android 工程（19 文件）+ 包名改 `io.github.bingyangl1`。产物 22.9 MB，含 ARM64 Python 3.10 运行时。
+
+#### 修复
+
+- **SQLite 内存库启动崩溃**（CI 暴露）：`create_engine` 无条件传 `pool_size`/`max_overflow`/`pool_timeout`，而 SQLite 用 `SingletonThreadPool`/`StaticPool` 不接受 → `TypeError`。**PC/安卓/单机部署的默认形态一启动就崩**。新增 `_engine_kwargs(url)` 按方言挑参数；内存库用 `StaticPool + check_same_thread=False`。
+- **`.gitignore` 的 `logs/` 吞掉新面板日志页面**：裸目录规则会匹配**任意深度** → `web/app/(main)/logs/` 整个目录被忽略，页面**从来没进过仓库**。本地文件在磁盘上所以看不出问题，别人克隆后点 `/logs` 404。改 `/logs/` 并加链接自检测试。
+- **兜底默认版本不分 realm**（CI 暴露）：`client_profile.DEFAULTS` 的 `5.5.6` 是双域改造前的旧值，而 `_REALM_DEFAULTS` 没覆盖版本号 → 服务器/CI/手机（无客户端）两版都报 5.5.6。**两版同版本本身就是混用特征**。补齐两版版本号并让 `DEFAULTS` 与 `REALM_FALLBACKS["cn"]` 单一来源。
+- **换凭据后仍被判「登录态失效」**（跟随上游 1.0.5）：账号因 401/403 判失效后，重新登录导入新凭据时原来的导入路径只覆盖 `auth_json`、不清 `session_dead_fails` / `cool_kind` / `status` → 导入成功但界面仍显示失效，用户只能删号重加（丢历史）。新增 `_reset_after_credential_update()`，**手动停用的账号不自动启用**（那是人的决定）。
+- **6008 恢复时点用错**（跟随上游 1.0.5）：原来统一「官方时间优先，否则保守 24h」。但 6008（每日请求数）官方说明**次日零点**重置 —— 20:00 触发的账号会被白关到再下一天 20:00。新增 `next_cn_midnight()`，仅 6008 使用（6004 保持 24h，两者不同）。
+- **APK 排除了 `server.py` 仍会 import 的模块**（CI 暴露）：上游 `build_android.py` 排除了 `app_source.py` 与 `routers/client_profile.py`，但我们的 `server.py` **无条件 import 两者** → APK 启动即 `ImportError`。**装上去根本打不开**。改为不排除任何 admin 模块。
+- **安卓自检要求未打包的 `/panel/`**（CI 暴露）：`build_android.py` 只复制 `admin/static`（旧面板），从不复制 `web/out`，自检却无条件检查 `/panel/` → 构建必然失败。改为按形态区分检查项。
+- **pip 源写死国内镜像**（CI 暴露）：清华源对国内友好，但 GitHub Actions runner 在海外会 `ReadTimeout`。改读 `WB_PIP_INDEX_URL`，CI 设官方 PyPI。
+- **签名用系统 TEMP 被 ACL 拒绝**（CI 暴露）：Windows runner 的 `%TEMP%`（乃至整个 workspace）带 `\OWNER RIGHTS` ACL，`ssh-keygen -Y sign` 直接拒绝。新增 `_work_dir()`：优先 `WB_SIGN_TMPDIR`，否则仓库内 `.sign_tmp/`。
+- **`at-rest` 测试传了不存在的路径**：`fetch_at_rest_secret_key()` 第一句就 `os.path.isfile(exe)`，传 `C:\fake\...` 会直接跳过、根本不调 subprocess → 断言 `is None` 的用例碰巧通过，断言 `== secret` 的失败。改为建真实临时文件。
+- **冒烟测试只认旧面板**：`#app`/`#appVersion` 在新面板不存在 → 改双模式（旧面板查 id / 新面板查 React 已挂载 + 文本 >= 60）。**且不以登录为前提** —— 空数据目录停在登录页是正常的。
+
+#### 改进
+
+- **`check_runtime.py` 重写**：在**全新临时 SQLite 库**上真起服务、真请求 11 个核心端点。能在 20 分钟的 APK 构建之前暴露「漏打包模块」。
+- **`check_runtime.py --android`**：按安卓形态只查旧面板（见上）。
+- **APK 内容解剖验证**：`tests/test_apk_content.py` 把 APK 当 zip 解剖 `assets/chaquopy/app.imy`（104 条目），确认 `converter.pyc`、各路由、147 条错误码数据齐全，且**无凭证/数据库/签名密钥**。
+- **文档补齐**：新增 [realm.md](docs-dev/realm.md) / [security.md](docs-dev/security.md) / [panel.md](docs-dev/panel.md) / [usage.md](docs-dev/usage.md) / [ENGINEERING-BASELINE.md](docs-dev/ENGINEERING-BASELINE.md)，并加链接自检测试（索引里提到的文件必须真实存在、文档里的数字必须能复现）。
+
+### 测试
+
+- 全量 **910 项通过**（+7 环境条件跳过），53 个测试文件。
+- 反向验证 **34 条 mutation 全部有效**，抓到过 9 次假绿（测试通过但改坏实现照样通过）。
+- 新增测试文件 12 个：`test_realm_identity_consistency` / `test_realm_audit_rounds` / `test_desktop_panel_p6` / `test_panel_update_ui` / `test_benefits` / `test_growth_lease` / `test_schedule_defaults` / `test_db_backends` / `test_mobile_runtime` / `test_upstream_1_0_5` / `test_android_packaging` / `test_apk_content` / `test_gitignore_source_safety` / `test_docs_links`。
+
 ## [0.1.0] - 基线
 
 ### 新增

@@ -331,6 +331,27 @@ MUTATIONS: list[Mutation] = [
             "\\OWNER RIGHTS，ssh-keygen 直接拒绝签名（本地复现不了）",
         tags=["sign", "ci"],
     ),
+    # ── 文档（链接必须真实、数字不能过期）──────────────────────────
+    Mutation(
+        name="docs-mutation-count-stale",
+        file="docs-dev/ENGINEERING-BASELINE.md",
+        old="| 反向验证 mutation | **34 条**（全部有效） |",
+        new="| 反向验证 mutation | **99 条**（全部有效） |",
+        tests=["tests/test_docs_links.py::DocumentedNumbersCase"],
+        why="文档里的数字过期 → 读者按 99 条去找却只有 34 条，"
+            "从此不再相信文档里的任何数字",
+        tags=["docs"],
+    ),
+    Mutation(
+        name="docs-broken-link",
+        file="docs-dev/README.md",
+        old="| [realm.md](realm.md) |",
+        new="| [realm.md](realm-missing.md) |",
+        tests=["tests/test_docs_links.py::DocsDevLinksCase"],
+        why="索引指向不存在的文件 → 点进去 404"
+            "（realm.md 等 4 份文档曾长期这样）",
+        tags=["docs"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

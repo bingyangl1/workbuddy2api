@@ -18,6 +18,13 @@
 > - **模型中心（P4 完成）**：按 realm 直连腾讯模型目录（显示名 / 描述 / 上下文 / 最大输出 / 推理档位 / 积分倍率 / 能力标记），回退上游清单并**如实标注来源**；`/panel/models/catalog` 按系列分组、搜索、能力筛选、排序浏览
 > - **聊天测试台（P4 完成）**：管理员免密钥直调真实模型，**走同一号池状态机**（选号 / 在途租约 / 错误分类 / 记账一份实现），记账口径与 `/v1` 一致（`key_id=0` + `use_case=playground` 区分）；流式可中断、右下角实时显示本次积分消耗
 > - **备份与更新（P5 完成）**：本地快照备份/恢复（全 15 张业务表，恢复前自动留底、单事务回滚、含密/脱敏双模式）；`scripts/update.py` 一键更新（三模式，**先验签后解压**，OpenSSH 签名）；`scripts/security_baseline.py` 更新后自动重施安全基线；`/panel/changelog` 离线更新日志查看器
+> - **桌面端接入新面板（P6 完成）**：`ADMIN_DEFAULT_PANEL=next` 时桌面版直接进 `/panel`；免密登录由本地启动器签发 token 经 bridge 传递（loopback + 端口 + 路径前缀三道约束 + 一次性 nonce）；侧边栏版本入口 + 双模式更新对话框（桥调用 / 浏览器直连）
+> - **限时权益 / 补偿（只能手动）**：`/panel/benefits` 三步走（选账号 → 查询可领 → 领取）。**刻意不给自动跑** —— 不在定时任务清单、数据库唯一约束防重、领取前必须先查、失败不置 claimed；状态不明（`unknown`）时**永不领取**
+> - **跨进程租约 + 执行审计**：基于 `SystemSetting` 表实现 CAS 租约，防多实例重复执行同一账号任务（典型风控触发场景）；每次运行写审计记录，可查
+> - **147 条上游错误码中文解释**：取自官方客户端，未知 code 不编造。接进最终错误消息，让「今日次数已用完，明日恢复」这类提示直接可见
+> - **全端零外部依赖**：SQLite 与 MySQL 均为一等后端，Redis 可选（`memory` / `auto` / `redis` 三档）。**PC 桌面版 / 安卓 / 单机 Docker 不需要 MySQL 或 Redis**
+> - **安卓 APK + Windows EXE 走 CI 打包**：打 tag 自动构建并发布到 Release；APK 含 ARM64 Python 运行时，构建后自动解剖验证「后端代码真的在里面、没有凭证泄露」
+> - **反向验证工具**：`scripts/verify_tests.py` —— 把实现故意改坏，断言测试必须变红。**专治假绿**（本项目已抓到 9 次「测试通过但没在测东西」）
 >
 > **上游吸收**：协议的字段级修正我们从社区延续仓库同步（每个吸收项单独提交并注明来源）。
 > 已吸收 / 待评估 / 明确不吸收三张清单见 [docs-dev/UPSTREAM-ABSORB.md](docs-dev/UPSTREAM-ABSORB.md)。
@@ -1664,7 +1671,24 @@ workbuddy2api/
 > **含未脱敏的真实手机号与 token 片段**，属于内部资料而非产品代码，不进仓库。
 >
 > `scripts/*.py` 默认忽略（本地诊断脚本），**产品级脚本已加例外入库**：
-> `build_desktop.py` / `update.py` / `security_baseline.py` / `panel_smoke_test.py`。
+> `build_desktop.py` / `update.py` / `security_baseline.py` / `panel_smoke_test.py` /
+> `verify_tests.py`（反向验证）/ `check_runtime.py`（启动自检）/ `build_android.py`（APK 打包）/ `sign_release.py`。
+
+### 专项文档（`docs-dev/`）
+
+| 主题 | 文档 | 适合谁 |
+|---|---|---|
+| **工程基线**（测试纪律 / 反向验证 / CI / 打包 / 踩坑清单） | [ENGINEERING-BASELINE.md](docs-dev/ENGINEERING-BASELINE.md) | 新接手的开发者**先看这个** |
+| **realm 双域隔离**（判定 / 必须分 realm 的清单 / 已修缺口 / 不变量） | [realm.md](docs-dev/realm.md) | 要改出站代码的人**必读** |
+| **密钥 / 入站治理 / 上游护栏** | [security.md](docs-dev/security.md) | 运维、安全、测试 |
+| **面板架构 / i18n / 构建 / 桌面端接入** | [panel.md](docs-dev/panel.md) | 改前端的人 |
+| **使用与运维**（网关接入 / 定时任务 / 权益 / 排障表） | [usage.md](docs-dev/usage.md) | 部署后日常使用 |
+| **移动端 / 单机部署**（SQLite 零依赖 / Redis 可选 / 安卓构建 / 互迁） | [MOBILE-AND-SINGLE-NODE.md](docs-dev/MOBILE-AND-SINGLE-NODE.md) | 单机、桌面、安卓用户 |
+| 本地开发环境 | [LOCAL-DEV-GUIDE.md](docs-dev/LOCAL-DEV-GUIDE.md) | 开发 |
+| 上游能力吸收记录 | [UPSTREAM-ABSORB.md](docs-dev/UPSTREAM-ABSORB.md) | 同步上游时参考 |
+
+> 文档里的相对链接与数字都有测试守着（`tests/test_docs_links.py`）——
+> 链接失效或「文档写 34 条 mutation 但实际不是」都会让 CI 红。
 > `tests/` 已入库（`!tests/test_*.py` 例外），本地诊断类脚本仍在忽略之列。
 
 #### 管理大屏的面板状态：地址栏 `?tab=`
