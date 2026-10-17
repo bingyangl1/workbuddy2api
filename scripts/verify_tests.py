@@ -454,6 +454,19 @@ MUTATIONS: list[Mutation] = [
         why="只写旧面板的 key → 新面板读不到 token → 停在登录页",
         tags=["android", "safety"],
     ),
+    # ── 两版计费隔离（同名模型倍率不同）──────────────────────────
+    Mutation(
+        name="billing-bare-model-lookup",
+        file="admin/routers/proxy.py",
+        old=("                lookup = (requested_model or model or \"\").strip()"),
+        new=("                lookup = (model or \"\").strip()  "
+             "# (mutation) 丢掉 requested_model，退回裸名"),
+        tests=["tests/test_realm_billing_isolation.py"
+               "::ProxyUsesRequestedModelCase"],
+        why="用裸名查倍率 → 永远命中 cn 那行 → 国际版免费模型被按国内版"
+            " 0.29 扣费（用户多付积分）",
+        tags=["realm", "billing"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

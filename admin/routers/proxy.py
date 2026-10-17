@@ -718,11 +718,35 @@ def _record_usage(key_id: int, account_id: int, model: str, credits: float | Non
             # credit_multiplier 在 model_configs 里保存的是「每千 token 积分」，
             # 因此估算公式为 total_tokens * multiplier / 1000；
             # 当 total_tokens 缺失时用 completion_tokens 兜底。
+            #
+            # ## ⚠️ 必须用 `requested_model`（带 realm 前缀）来找配置
+            #
+            # 两版**同名模型的计费不同**。实测（dev 库）：
+            #
+            #     hy4-preview          cn  = 0.29
+            #     global:hy4-preview   global = 0.00（免费）
+            #
+            # 而调用链里 `model` 在 proxy 入口就被剥成了裸名
+            # （`if model_realm: model = model_bare`，上游只认裸名），
+            # 于是按 `ModelConfig.model_id == model` 查会**永远命中 cn 那行** ——
+            # 调用国际版免费模型却按国内版 0.29 扣费。
+            #
+            # `requested_model` 保存的是**客户端原始请求名**（带前缀），
+            # 正好能区分两版。优先用它；没有时退回 `model`（兼容旧调用）。
             estimated = False
             original_credits = credits
             if credits is None and (total_tokens or completion_tokens):
-                mc = db.query(ModelConfig).filter(ModelConfig.model_id == (model or ""),
-                                                   ModelConfig.enabled == 1).first()
+                lookup = (requested_model or model or "").strip()
+                mc = None
+                if lookup:
+                    mc = (db.query(ModelConfig)
+                          .filter(ModelConfig.model_id == lookup,
+                                  ModelConfig.enabled == 1).first())
+                if mc is None and lookup != (model or "").strip():
+                    # 原始名查不到（可能是裸名请求 / 前缀没存），退回裸名
+                    mc = (db.query(ModelConfig)
+                          .filter(ModelConfig.model_id == (model or ""),
+                                  ModelConfig.enabled == 1).first())
                 mult = mc.credit_multiplier if mc else 0
                 if mult:
                     toks = total_tokens if total_tokens else completion_tokens
