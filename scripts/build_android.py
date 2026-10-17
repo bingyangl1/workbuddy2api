@@ -125,6 +125,26 @@ def prepare() -> None:
     index.write_text(mobile_html(index.read_text(encoding="utf-8")), encoding="utf-8")
     for name in ("mobile.js", "mobile.css", "mobile_settings.js"):
         shutil.copy2(ROOT / "android/web" / name, staging / "admin/static" / name)
+
+    # ── 新面板（P3 静态导出产物）──────────────────────────────────
+    #
+    # APK 里**两套面板都打包**：
+    #
+    #   旧面板  admin/static/index.html  → /admin（移动端适配版）
+    #   新面板  web/out                  → /panel（Next.js 静态导出）
+    #
+    # 默认落点由 `ADMIN_DEFAULT_PANEL` 决定（`android_runtime.py` 里设为 next）。
+    # 保留旧面板是为了「新面板出问题时能一键回退」，成本只是几 MB。
+    #
+    # ⚠️ 必须先 `cd web && NEXT_OUTPUT_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/panel npm run build`。
+    # 没构建就跳过（`--prepare-only` 在无 Node 环境下仍要能用），
+    # 但**打 APK 时会显式报错**（见下方 `require_panel` 参数）。
+    web_out = ROOT / "web" / "out"
+    if web_out.is_dir() and (web_out / "index.html").is_file():
+        shutil.copytree(web_out, staging / "web/out")
+        print(f"  新面板已打包：{len(list((staging / 'web/out').rglob('*')))} 个条目")
+    else:
+        print("  ⚠️ 未找到 web/out（新面板未构建）—— APK 里将只有旧面板")
     for name in ("android_runtime.py", "mobile_http.py"):
         shutil.copy2(ROOT / "android/python" / name, staging / name)
     shutil.copy2(ROOT / "LICENSE", staging / "LICENSE")

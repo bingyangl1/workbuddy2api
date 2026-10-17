@@ -302,12 +302,14 @@ MUTATIONS: list[Mutation] = [
         name="android-check-requires-panel",
         file="scripts/check_runtime.py",
         old=("    panel_checks = [(\"/api/app/version\", \"版本\"), (\"/admin\", \"旧面板\")]\n"
+             "    # 安卓与其它形态一样都有新面板；只有「明确只有旧面板」时才跳过\n"
+             "    if not (args.android and os.getenv(\"ADMIN_DEFAULT_PANEL\") == \"legacy\"):\n"
+             "        panel_checks.append((\"/panel/\", \"新面板\"))"),
+        new=("    panel_checks = [(\"/api/app/version\", \"版本\"), (\"/admin\", \"旧面板\")]\n"
              "    if not args.android:\n"
              "        panel_checks.append((\"/panel/\", \"新面板\"))"),
-        new=("    panel_checks = [(\"/api/app/version\", \"版本\"), (\"/admin\", \"旧面板\"),\n"
-             "                    (\"/panel/\", \"新面板\")]"),
         tests=["tests/test_android_packaging.py::AndroidCheckMatchesPackagingCase"],
-        why="安卓不打包 web/out，自检却要求 /panel/ → 构建必然失败",
+        why="安卓也打包新面板了，自检却跳过 /panel/ → 白屏时 CI 检不出来",
         tags=["android", "packaging"],
     ),
     Mutation(
@@ -408,6 +410,49 @@ MUTATIONS: list[Mutation] = [
         why="把移除引导层放到 enterApp 之后 → enterApp 一抛异常，"
             "用户永久卡在启动画面（服务其实是好的，且 WebView 不转发 console）",
         tags=["android", "webview"],
+    ),
+    # ── 安卓新面板打包（两套面板 + 落点 + token key 兼容）──────────
+    Mutation(
+        name="android-no-panel-copy",
+        file="scripts/build_android.py",
+        old="        shutil.copytree(web_out, staging / \"web/out\")",
+        new="        pass  # (mutation) 不复制新面板",
+        tests=["tests/test_android_panel_bundle.py::PackagingCase"],
+        why="不把 web/out 复制进 staging → APK 里没有新面板，"
+            "而 runtime 又设了 DEFAULT_PANEL=next → 白屏"
+            "（这是「改了打包忘了 runtime」或反之的典型）",
+        tags=["android", "packaging"],
+    ),
+    Mutation(
+        name="android-isadmin-no-panel",
+        file="android/app/src/main/java/io/github/bingyangl1/workbuddy2api/MainActivity.java",
+        old=("        return path.equals(\"/admin\") || path.startsWith(\"/admin/\")\n"
+             "            || path.equals(\"/panel\") || path.startsWith(\"/panel/\");"),
+        new="        return path.equals(\"/admin\") || path.startsWith(\"/admin/\");",
+        tests=["tests/test_android_panel_bundle.py::LandingCase"],
+        why="isAdmin 只认 /admin → 新面板拿不到 token 注入 → "
+            "永久卡在「正在打开工作台」引导层（真机实测踩过）",
+        tags=["android", "safety"],
+    ),
+    Mutation(
+        name="android-default-legacy",
+        file="android/app/src/main/java/io/github/bingyangl1/workbuddy2api/MainActivity.java",
+        old='    private static final String DEFAULT_PANEL = "next";',
+        new='    private static final String DEFAULT_PANEL = "legacy";',
+        tests=["tests/test_android_panel_bundle.py::LandingCase::"
+               "test_default_panel_is_next"],
+        why="默认落点改回旧面板 → 与桌面端不一致，用户以为新 UI 没生效",
+        tags=["android"],
+    ),
+    Mutation(
+        name="android-token-key-single",
+        file="android/web/mobile.js",
+        old="    try { localStorage.setItem('wb-admin-token', token); } "
+            "catch (e) { /* 隐私模式 */ }",
+        new="    // (mutation) 不写新面板的 key",
+        tests=["tests/test_android_panel_bundle.py::TokenKeyCompatCase"],
+        why="只写旧面板的 key → 新面板读不到 token → 停在登录页",
+        tags=["android", "safety"],
     ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(

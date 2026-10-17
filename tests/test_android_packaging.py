@@ -142,33 +142,69 @@ class StagingMatchesServerImportsCase(unittest.TestCase):
 class AndroidCheckMatchesPackagingCase(unittest.TestCase):
     """`check_runtime --android` 的检查项要和实际打包内容一致。"""
 
-    def test_android_does_not_require_new_panel(self):
-        """安卓只打包旧面板，自检不能要求 `/panel/`。"""
+    def test_android_requires_new_panel(self):
+        """安卓**现在也打包新面板**，自检应当要求 `/panel/`。
+
+        ## 历史
+
+        早先 `build_android.py` 只复制 `admin/static`（旧面板），
+        所以这条断言当时写的是「安卓不检查 /panel/」。
+
+        后按用户要求「安卓也默认上新面板」，`build_android.py` 开始复制
+        `web/out`，`android_runtime.py` 也设了 `ADMIN_PANEL_STATIC=1` +
+        `ADMIN_DEFAULT_PANEL=next` —— 于是 `/panel/` **应该**能访问，
+        自检也该验它。
+
+        两边的约束关系（原文保留）：
+        > 如果哪天真的把 web/out 打进 APK，应该同时改掉相关测试
+        >（而不是让两条互相矛盾）
+        """
         src = CHECK.read_text(encoding="utf-8")
-        # 必须有「按形态决定是否检查 /panel/」的逻辑
         self.assertIn("args.android", src,
                       "check_runtime 应按 android 形态区分检查项")
-        # 找到 panel_checks 那段，确认 /panel/ 在条件里
-        i = src.find("panel_checks")
-        self.assertGreater(i, 0, "应有 panel_checks 组装逻辑")
-        seg = src[i:i + 600]
-        self.assertIn("args.android", seg,
-                      "`/panel/` 的检查必须受 android 形态控制 —— "
-                      "build_android.py 只复制 admin/static，不含 web/out")
 
-    def test_build_does_not_copy_web_out(self):
-        """确认「安卓不打包新面板」这个前提仍然成立。
+        # **行为级断言**：直接调 check_runtime 内部的逻辑不现实（它要起服务），
+        # 所以这里检查「android 形态下 /panel/ 不会被排除」这个**否定条件**。
+        #
+        # 为什么不能只查 `/panel/` 出现：
+        #   反向验证抓到过两次假绿 ——
+        #     ① 注释里写着 `/panel/`；
+        #     ② `if not args.android:` 那种**旧逻辑**里也有
+        #        `panel_checks.append(("/panel/", ...))`，
+        #        条件本身变了但字符串还在。
+        #
+        # 所以必须断言：**不存在「args.android 且 legacy 才跳过」之外的排除**。
+        import re as _re
 
-        如果哪天真的把 web/out 打进 APK，应该同时改掉上一条测试
-        （而不是让两条互相矛盾）。
+        # 找到 panel_checks 定义后的整段（到 try: 之前）
+        i = src.find("panel_checks = [")
+        self.assertGreater(i, 0, "找不到 panel_checks 定义")
+        j = src.find("try:", i)
+        seg = src[i:j if j > 0 else i + 600]
+
+        self.assertIn("/panel/", seg, "panel_checks 段里应包含 /panel/")
+        # 关键：不能出现「if not args.android」这种按形态跳过新面板的写法
+        self.assertNotRegex(
+            seg, r"if\s+not\s+args\.android\s*:",
+            "**不能在 android 形态下跳过 /panel/** —— 安卓已打包新面板，"
+            "自检不查它等于没验证（白屏时 CI 检不出来）。"
+            "若只想在 legacy 模式跳过，条件应写成 "
+            "`if not (args.android and ADMIN_DEFAULT_PANEL=='legacy')`")
+
+    def test_build_copies_web_out(self):
+        """确认「安卓打包新面板」这个前提成立。
+
+        与上一条**必须同时成立** —— 两条互相约束：
+        打包了却不检查，等于没验证；检查了却没打包，构建必失败。
         """
         src = BUILD.read_text(encoding="utf-8")
-        copies_web_out = ("web/out" in src or "web\" / \"out\"" in src
-                          or "WEB_OUT" in src)
-        self.assertFalse(
-            copies_web_out,
-            "build_android.py 现在会复制 web/out 了？"
-            "若已支持新面板，请同时更新 test_android_does_not_require_new_panel")
+        self.assertIn(
+            "web_out", src,
+            "build_android.py 应引用 web/out 并复制进 staging")
+        self.assertRegex(
+            src, r"copytree\(\s*web_out\s*,\s*staging\s*/\s*[\"']web/out[\"']",
+            "**必须把 web/out 复制进 staging** —— 否则 APK 里没有新面板，"
+            "而 android_runtime 又设了 DEFAULT_PANEL=next → 白屏")
 
 
 class PipIndexConfigurableCase(unittest.TestCase):

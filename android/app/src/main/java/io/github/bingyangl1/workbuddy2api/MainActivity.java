@@ -34,6 +34,28 @@ public class MainActivity extends Activity {
     private volatile String exportRequest;
     private byte[] exportBytes;
     private volatile boolean exportWriting;
+    /**
+     * 面板落点：`next` = 新面板（/panel），`legacy` = 旧面板（/admin）。
+     *
+     * 与桌面端语义一致（`desktop/app.py::_landing_url`）：
+     *   next   → /panel?desktop=1&android=1&mobile=1
+     *   legacy → /admin?desktop=1&android=1
+     *
+     * **默认 next**：与桌面版对齐，且新面板本身已有移动端适配
+     * （汉堡菜单 + portal 抽屉 + 375px 响应式，都有测试守着）。
+     *
+     * 旧面板仍然打包在 APK 里 —— 新面板万一出问题，改这个常量即可回退。
+     */
+    private static final String DEFAULT_PANEL = "next";
+
+    /** 当前要加载的面板路径（含 query）。 */
+    private String landingPath() {
+        boolean next = !"legacy".equalsIgnoreCase(DEFAULT_PANEL);
+        if (!next) return "/admin?desktop=1&android=1";
+        // `mobile=1` 让新面板知道自己在手机上（配合窄屏布局与触控优化）
+        return "/panel?desktop=1&android=1&mobile=1";
+    }
+
     private final Runnable waitForServer = new Runnable() {
         @Override public void run() {
             if (destroyed) return;
@@ -42,7 +64,7 @@ public class MainActivity extends Activity {
                     (!origin.equals(loadedOrigin) || loadedRevision != LocalApiService.revision)) {
                 loadedOrigin = origin;
                 loadedRevision = LocalApiService.revision;
-                web.loadUrl(origin + "/admin?desktop=1&android=1");
+                web.loadUrl(origin + landingPath());
             } else if (origin == null) {
                 boot.setVisibility(View.VISIBLE);
                 boolean failed = LocalApiService.error != null;
@@ -269,11 +291,32 @@ public class MainActivity extends Activity {
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
+    /**
+     * 这个 URL 是否属于「本站面板」（需要注入 token / 允许在 WebView 内导航）。
+     *
+     * ⚠️ **必须同时认 `/panel`**（新面板）。
+     *
+     * 原实现只认 `"/admin".equals(uri.getPath())` —— 那是单面板时代的写法。
+     * 一旦落点改到新面板，`onPageFinished` 里的 `isAdmin(url)` 就恒为 false，
+     * 于是 `WBMobile.initialize(token)` **永不执行**，界面会永久停在
+     * 「正在打开工作台」引导层上（真机上排查了很久才定位）。
+     *
+     * 现在同时接受：
+     *   /admin           旧面板
+     *   /admin/...       旧面板子路径
+     *   /panel           新面板入口
+     *   /panel/...       新面板各页（/panel/models/ 等）
+     */
     private boolean isAdmin(String url) {
         if (loadedOrigin == null || url == null) return false;
         Uri uri = Uri.parse(url);
-        return "http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost())
-            && uri.getPort() == Uri.parse(loadedOrigin).getPort() && "/admin".equals(uri.getPath());
+        if (!"http".equals(uri.getScheme())) return false;
+        if (!"127.0.0.1".equals(uri.getHost())) return false;
+        if (uri.getPort() != Uri.parse(loadedOrigin).getPort()) return false;
+        String path = uri.getPath();
+        if (path == null) return false;
+        return path.equals("/admin") || path.startsWith("/admin/")
+            || path.equals("/panel") || path.startsWith("/panel/");
     }
     private boolean route(Uri uri) {
         if (isAdmin(uri.toString())) return false;

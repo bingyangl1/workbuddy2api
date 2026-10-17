@@ -20,6 +20,16 @@ window.WBMobile = (() => {
   function initialize(token) {
     TOKEN = token;
     localStorage.setItem(TOKEN_KEY, token);
+    // ⚠️ **同时写新面板的 key**。
+    //
+    // 两套面板用的 key 不同：
+    //
+    //   旧面板（admin/static/index.html）：`wb_admin_token`（下划线）
+    //   新面板（web/lib/api.ts）        ：`wb-admin-token`（连字符）
+    //
+    // Android 壳要在**两套面板**里都能免密登录，所以两个都写。
+    // 早先只写旧 key，新面板打开时读不到 token → 停在登录页。
+    try { localStorage.setItem('wb-admin-token', token); } catch (e) { /* 隐私模式 */ }
     if (!initialized) {
       initialized = true;
       // ── 顺序很关键：**先拆掉引导层，再做任何可能失败的事** ──────────

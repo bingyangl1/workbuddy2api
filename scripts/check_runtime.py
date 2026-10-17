@@ -110,16 +110,19 @@ def _run(args, work: str) -> int:
 
     # ② 真的起服务并请求
     failures: list[str] = []
-    # 面板检查项**按形态**决定：
+    # 面板检查项：
     #
-    #   * 服务端 / 桌面端：新旧两个面板都要在（`ADMIN_DEFAULT_PANEL` 可切）
-    #   * **安卓端：只有旧面板** —— `build_android.py` 只打包
-    #     `admin/static`（旧面板）+ 移动版 CSS/JS，**不复制 `web/out`**。
+    #   * 服务端 / 桌面端：新旧两个面板都在（`ADMIN_DEFAULT_PANEL` 可切）
+    #   * **安卓端：也都打包了** —— `build_android.py` 现在同时复制
+    #     `admin/static`（旧面板）与 `web/out`（新面板），
+    #     `android_runtime.py` 设 `ADMIN_PANEL_STATIC=1` + `DEFAULT_PANEL=next`。
     #
-    # 早先这里无条件检查 `/panel/`，于是 APK 构建时必然 404
-    #（CI 实测踩过：`Preflight check` 步骤直接失败）。
+    # 历史：早先安卓只打包旧面板，这里曾按形态跳过 `/panel/`。
+    # 后来改为「安卓也上新面板」，于是取消那个例外 —— **两处必须同步改**：
+    # 打包了却不检查 = 没验证；检查了却没打包 = 构建必失败。
     panel_checks = [("/api/app/version", "版本"), ("/admin", "旧面板")]
-    if not args.android:
+    # 安卓与其它形态一样都有新面板；只有「明确只有旧面板」时才跳过
+    if not (args.android and os.getenv("ADMIN_DEFAULT_PANEL") == "legacy"):
         panel_checks.append(("/panel/", "新面板"))
     try:
         with TestClient(app) as client:

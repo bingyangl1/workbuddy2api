@@ -46,7 +46,7 @@
 
 | 文档 | 内容 | 状态 |
 |---|---|---|
-| [ENGINEERING-BASELINE.md](ENGINEERING-BASELINE.md) | 测试纪律、反向验证（39 条 mutation）、CI、打包、踩坑清单 | ✅ |
+| [ENGINEERING-BASELINE.md](ENGINEERING-BASELINE.md) | 测试纪律、反向验证（43 条 mutation）、CI、打包、踩坑清单 | ✅ |
 | [realm.md](realm.md) | 国际版双域隔离：判定、必须按 realm 分的清单、已修复的 10 处缺口、不变量 | ✅ |
 | [security.md](security.md) | 密钥 20 维、入站治理、**两级上游护栏**、审计、免密登录 | ✅ |
 | [panel.md](panel.md) | 新面板技术栈、25 个页面、导航单一来源、移动端 portal、i18n、构建 | ✅ |
@@ -64,7 +64,7 @@
 3. 环境变量以 `.env.example` 为准（`ADMIN_` 前缀命名），文档引用不复制全表。
 4. **绝不**把未脱敏的账号 / token / 手机号写进 `docs-dev/`（那是 `docs/` 的事，且本地保留）。
 5. **文档里的数字要能复现** —— 写「910 项测试」就要真的能跑出 910 项；
-   写「39 条 mutation」就要 `verify_tests.py --list` 数得出来。
+   写「43 条 mutation」就要 `verify_tests.py --list` 数得出来。
    宁可写「约」，也不要写一个从未验证过的精确数字。
 
 ### 链接自检

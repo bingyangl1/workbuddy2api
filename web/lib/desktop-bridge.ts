@@ -35,6 +35,9 @@
  * 这里**重新导出**，让调用方只 import 一个模块即可。
  */
 import type {ReleaseRow, ReleasesPayload, UpdateState} from '@/lib/types';
+// `writeToken` 来自 api.ts（那边负责 sessionStorage 的唯一写入点）。
+// 已确认 api.ts **不**引用 desktop-bridge，所以这里不会有循环依赖。
+import {writeToken} from '@/lib/api';
 
 export type {ReleaseRow, ReleasesPayload, UpdateState};
 
@@ -79,7 +82,7 @@ declare global {
  */
 export function isDesktopLaunch(): boolean {
   if (typeof window === 'undefined') return false;
-  if (hasDesktopBridge()) return true;
+  if (hasDesktopBridge() || hasAndroidBridge()) return true;
   try {
     return new URLSearchParams(window.location.search).get('desktop') === '1';
   } catch {
@@ -91,6 +94,74 @@ export function isDesktopLaunch(): boolean {
 export function hasDesktopBridge(): boolean {
   if (typeof window === 'undefined') return false;
   return typeof window.pywebview?.api?.desktop_login === 'function';
+}
+
+/**
+ * 安卓壳（APK）的桥是否就绪。
+ *
+ * ## 与桌面端的区别
+ *
+ * | | 桌面端（PyWebView） | 安卓（WebView + Java） |
+ * |---|---|---|
+ * | 注入对象 | `window.pywebview.api` | `window.WBMobile` |
+ * | 免密方式 | `pywebview.api.desktop_login()` | Java 主动调 `WBMobile.initialize(token)` |
+ * | 谁发起 | JS 主动请求 | **Java 主动推送** |
+ *
+ * 所以安卓端**不需要**我们去「请求 token」—— Java 那边在
+ * `onPageFinished` 里直接调 `WBMobile.initialize(token)`，
+ * 由壳内脚本把 token 写进 `localStorage`。
+ *
+ * 新面板要做的只有一件事：**认出自己在安卓壳里**，
+ * 然后等壳把 token 塞进来（见 `waitForAndroidToken`）。
+ */
+export function hasAndroidBridge(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as {
+    WBMobile?: unknown;
+    WBAndroid?: unknown;
+  };
+  // `WBAndroid` 是 `addJavascriptInterface` 注入的原生接口（Java 侧一定先注入），
+  // `WBMobile` 是页面脚本包装。两者任一存在即认为在安卓壳里。
+  return Boolean(w.WBAndroid) || Boolean(w.WBMobile);
+}
+
+/**
+ * 等安卓壳把 token 写进 localStorage（最多 `timeoutMs`）。
+ *
+ * Java 的时序：`onPageFinished` → `evaluateJavascript("WBMobile.initialize(tok)")`
+ * → 旧面板脚本写 `localStorage['wb_admin_token']`。
+ *
+ * 新面板用自己的一套：等待 `wb-admin-token` 出现即可（壳会写到这个 key，
+ * 见 `android/web/mobile.js` 的 `TOKEN_KEY` 兼容处理）。
+ */
+export function waitForAndroidToken(timeoutMs = 15000): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  const KEY = 'wb-admin-token';
+  try {
+    if (window.localStorage.getItem(KEY)) return Promise.resolve(true);
+  } catch {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    let poll = 0;
+    let timer = 0;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      window.clearInterval(poll);
+      window.clearTimeout(timer);
+      resolve(ok);
+    };
+    poll = window.setInterval(() => {
+      try {
+        if (window.localStorage.getItem(KEY)) finish(true);
+      } catch {
+        finish(false);
+      }
+    }, 200);
+    timer = window.setTimeout(() => finish(false), timeoutMs);
+  });
 }
 
 /**
@@ -226,6 +297,32 @@ export async function ensureDesktopToken(
     // 已有 token（别的路径已经写成功）→ 直接用，不必再问桥。
     if (cachedToken) return cachedToken;
     if (readTokenSafe()) return cachedToken;
+
+    // ── 安卓壳分支 ────────────────────────────────────────────────
+    //
+    // 安卓**不通过 pywebview 请求 token** —— 是 Java 在 `onPageFinished`
+    // 里主动调 `WBMobile.initialize(token)`，由壳内脚本写进 localStorage。
+    //
+    // 所以这里只需要「等它写进来」。等到了就直接用（同时补写
+    // sessionStorage，之后 `readTokenSafe()` 就能命中）。
+    if (hasAndroidBridge()) {
+      const ok = await waitForAndroidToken(gapMs * 2);
+      if (ok) {
+        try {
+          const t = window.localStorage.getItem('wb-admin-token');
+          if (t) {
+            writeToken(t);
+            return t;
+          }
+        } catch {
+          /* localStorage 不可用 —— 落回下面的轮询 */
+        }
+      }
+      // 安卓端没有「问桥」这一步，直接进下一轮等待
+      await new Promise((r) => window.setTimeout(r, gapMs));
+      continue;
+    }
+
     const token = await requestDesktopToken();
     if (token) return token;
     await new Promise((r) => window.setTimeout(r, gapMs));

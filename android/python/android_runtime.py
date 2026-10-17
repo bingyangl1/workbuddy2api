@@ -81,6 +81,25 @@ def start(directory: str) -> str:
                            "ADMIN_GATEWAY_LIMIT_BACKEND": "memory", "ADMIN_HOST": "0.0.0.0",
                            "ADMIN_USERNAME": config["username"], "ADMIN_PASSWORD": config["password"],
                            "ADMIN_JWT_SECRET": config["jwt_secret"], "ADMIN_DEV_TOOLS": "0"})
+        # ── 面板托管 ────────────────────────────────────────────────
+        #
+        # APK 里两套面板都打包（build_android.py 复制 admin/static 与 web/out）：
+        #
+        #   旧面板  /admin   移动端适配版
+        #   新面板  /panel   Next.js 静态导出
+        #
+        # `ADMIN_DEFAULT_PANEL=next` 让 `/` 与 `/admin` 也指向新面板
+        # （与桌面端 desktop/app.py 的 setdefault 保持一致）。
+        #
+        # ⚠️ `ADMIN_PANEL_STATIC=1` **必须开**，否则 `/panel` 根本不会挂载，
+        # 新面板一打开就是 404。手机上不可能现装 Node 去构建，
+        # 产物是打包时由 build_android.py 从 web/out 复制进来的。
+        #
+        # 用 setdefault：环境里显式设了就以用户为准
+        #（排查时可临时 `ADMIN_DEFAULT_PANEL=legacy` 切回旧面板）。
+        os.environ.setdefault("ADMIN_PANEL_STATIC", "1")
+        os.environ.setdefault("ADMIN_PANEL_PATH", "/panel")
+        os.environ.setdefault("ADMIN_DEFAULT_PANEL", "next")
         logs = base / "logs"
         logs.mkdir(exist_ok=True)
         handler = RotatingFileHandler(logs / "mobile.log", maxBytes=4*1048576, backupCount=3, encoding="utf-8")
