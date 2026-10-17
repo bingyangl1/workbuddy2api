@@ -37,6 +37,10 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match desktop/version.json' }
       - run: python -m pip install -r requirements-desktop-lock.txt
       - run: python -m unittest discover -s tests -p test_desktop.py -v
+      # P6 桌面端接入新面板：免密登录白名单 + 落点可配 + 冒烟两种面板。
+      # 这几项**必须进 CI**：它们守着「桌面端能不能打开后台」，
+      # 而这类故障只在打包后暴露（本地 npm run dev 看不出来）。
+      - run: python -m unittest discover -s tests -p test_desktop_panel_p6.py -v
       - run: python -m unittest discover -s tests -p "test_sign_release.py" -v
       - run: python scripts/build_desktop.py
       # 签名（P5）：私钥来自 GitHub Secrets，**base64 单行**注入。
