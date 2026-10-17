@@ -142,6 +142,11 @@ jobs:
             android-signing-${{ github.repository }}
 
       - name: Build APK
+        env:
+          # GitHub Actions runner 在海外 —— 用官方 PyPI。
+          # `build_android.py` 默认走清华源（对国内开发机友好），
+          # 但那在国内镜像对海外 runner 反而超时（实测 ReadTimeout）。
+          WB_PIP_INDEX_URL: https://pypi.org/simple
         run: |
           python scripts/build_android.py \
             --gradle "$(which gradle)" \

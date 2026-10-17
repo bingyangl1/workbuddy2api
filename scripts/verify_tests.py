@@ -281,6 +281,45 @@ MUTATIONS: list[Mutation] = [
         why="解释函数写好了但没接进用户可见消息（典型假绿形态）",
         tags=["upstream", "wiring"],
     ),
+    # ── 安卓打包（staging 与 server.py import 必须一致）────────────
+    Mutation(
+        name="android-excludes-module",
+        file="scripts/build_android.py",
+        old=("        target = staging / relative\n"
+             "        target.parent.mkdir(parents=True, exist_ok=True)\n"
+             "        shutil.copy2(path, target)"),
+        new=("        if path.name in ('app_source.py',):\n"
+             "            continue\n"
+             "        target = staging / relative\n"
+             "        target.parent.mkdir(parents=True, exist_ok=True)\n"
+             "        shutil.copy2(path, target)"),
+        tests=["tests/test_android_packaging.py::StagingMatchesServerImportsCase"],
+        why="排除 app_source.py → server.py 无条件 import 它 → APK 启动 ImportError"
+            "（CI 实测踩过：应用根本起不来）",
+        tags=["android", "packaging"],
+    ),
+    Mutation(
+        name="android-check-requires-panel",
+        file="scripts/check_runtime.py",
+        old=("    panel_checks = [(\"/api/app/version\", \"版本\"), (\"/admin\", \"旧面板\")]\n"
+             "    if not args.android:\n"
+             "        panel_checks.append((\"/panel/\", \"新面板\"))"),
+        new=("    panel_checks = [(\"/api/app/version\", \"版本\"), (\"/admin\", \"旧面板\"),\n"
+             "                    (\"/panel/\", \"新面板\")]"),
+        tests=["tests/test_android_packaging.py::AndroidCheckMatchesPackagingCase"],
+        why="安卓不打包 web/out，自检却要求 /panel/ → 构建必然失败",
+        tags=["android", "packaging"],
+    ),
+    Mutation(
+        name="android-pip-mirror-hardcoded",
+        file="scripts/build_android.py",
+        old=("    index_url = os.getenv('WB_PIP_INDEX_URL',\n"
+             "                          'https://pypi.tuna.tsinghua.edu.cn/simple')"),
+        new="    index_url = 'https://pypi.tuna.tsinghua.edu.cn/simple'",
+        tests=["tests/test_android_packaging.py::PipIndexConfigurableCase"],
+        why="写死国内镜像 → GitHub Actions（海外 runner）连它 ReadTimeout",
+        tags=["android", "ci"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

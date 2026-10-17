@@ -24,9 +24,24 @@ def check_runtime() -> None:
     python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     if not python.is_file():
         venv.EnvBuilder(with_pip=True).create(environment)
+    # ⚠️ pip 源必须**可配置**，不能写死国内镜像。
+    #
+    # 原来写死清华源（`pypi.tuna.tsinghua.edu.cn`）：在国内开发机上确实快，
+    # 但 GitHub Actions 的 runner 在海外 —— 连国内镜像反而超时：
+    #
+    #     ReadTimeoutError: HTTPSConnectionPool(
+    #         host='pypi.tuna.tsinghua.edu.cn', port=443): Read timed out.
+    #     ...重试 5 次后失败
+    #
+    # CI 上应该用官方 PyPI（runner 到 pypi.org 是快的）。
+    # 所以：优先读环境变量 `WB_PIP_INDEX_URL`，其次国内默认值（本地友好），
+    # CI 里显式设成官方源即可。
+    index_url = os.getenv('WB_PIP_INDEX_URL',
+                          'https://pypi.tuna.tsinghua.edu.cn/simple')
     subprocess.run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check',
-                    '-r', str(ROOT / 'android/requirements.txt'), '--index-url',
-                    'https://pypi.tuna.tsinghua.edu.cn/simple'], check=True)
+                    '-r', str(ROOT / 'android/requirements.txt'),
+                    '--index-url', index_url,
+                    '--retries', '5', '--timeout', '60'], check=True)
     subprocess.run([str(python), str(ROOT / 'scripts/check_runtime.py'), '--android',
                     '--source-dir', str(STAGING)], cwd=ROOT, check=True)
 
@@ -67,8 +82,30 @@ def prepare() -> None:
     staging.mkdir(parents=True)
     for path in (ROOT / "admin").rglob("*.py"):
         relative = path.relative_to(ROOT)
-        if path.name in ("app_source.py",) or relative == Path("admin/routers/client_profile.py"):
-            continue
+        # ⚠️ **不要在这里排除任何 admin 模块**。
+        #
+        # 上游那版排除了两个：
+        #     app_source.py             —— 拆包浏览工具
+        #     routers/client_profile.py —— 客户端参数页
+        #
+        # 那是**按上游自己的 server.py 写的**。而我们的 `admin/server.py`
+        # 是**无条件 import 两者**的：
+        #
+        #     from admin.routers import (..., app_source, ...,
+        #                                benefits, client_profile, ...)
+        #     app.include_router(app_source.router)
+        #     app.include_router(client_profile.router)
+        #
+        # 排掉之后 APK 里的运行时直接
+        #     ImportError: cannot import name 'app_source' from 'admin.routers'
+        # 起不来 —— CI 的 `check_runtime --android` 一跑就报出来了。
+        #
+        # 权衡：这两个都是**只读页面/工具**，打包进去只多几十 KB；
+        # 而 import 失败是**应用起不来**。留着显然更划算。
+        #
+        # 真要不带这些功能，应该在 server.py 里做**条件挂载**
+        #（如 `if not is_android():`），而不是在打包时偷偷删文件 ——
+        # 那种「源码里有、产物里没有」的不一致最难查。
         target = staging / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)

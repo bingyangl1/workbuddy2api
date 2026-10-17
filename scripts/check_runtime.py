@@ -110,11 +110,20 @@ def _run(args, work: str) -> int:
 
     # ② 真的起服务并请求
     failures: list[str] = []
+    # 面板检查项**按形态**决定：
+    #
+    #   * 服务端 / 桌面端：新旧两个面板都要在（`ADMIN_DEFAULT_PANEL` 可切）
+    #   * **安卓端：只有旧面板** —— `build_android.py` 只打包
+    #     `admin/static`（旧面板）+ 移动版 CSS/JS，**不复制 `web/out`**。
+    #
+    # 早先这里无条件检查 `/panel/`，于是 APK 构建时必然 404
+    #（CI 实测踩过：`Preflight check` 步骤直接失败）。
+    panel_checks = [("/api/app/version", "版本"), ("/admin", "旧面板")]
+    if not args.android:
+        panel_checks.append(("/panel/", "新面板"))
     try:
         with TestClient(app) as client:
-            for path, label in [("/api/app/version", "版本"),
-                                ("/admin", "旧面板"),
-                                ("/panel/", "新面板")]:
+            for path, label in panel_checks:
                 r = client.get(path)
                 ok = r.status_code == 200
                 print(f"   {'✅' if ok else '❌'} GET {path:<22} "
