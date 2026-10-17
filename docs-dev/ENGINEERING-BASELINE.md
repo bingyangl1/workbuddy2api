@@ -13,7 +13,7 @@
 |---|---|
 | 测试总数 | **910 通过**（+7 环境条件跳过） |
 | 测试文件 | 53 个 |
-| 反向验证 mutation | **34 条**（全部有效） |
+| 反向验证 mutation | **36 条**（全部有效） |
 | CI 工作流 | 3 个（tests / desktop-release / android-release） |
 | 代码规模 | `admin/` 约 25000 行 + `converter.py` 1682 行 |
 
@@ -56,7 +56,7 @@ ADMIN_UPSTREAM_READONLY_ALL=1
 ### 用法
 
 ```bash
-python scripts/verify_tests.py            # 跑全部 34 条
+python scripts/verify_tests.py            # 跑全部 36 条
 python scripts/verify_tests.py --list     # 看清单
 python scripts/verify_tests.py --only lease
 python scripts/verify_tests.py --check    # CI 模式（有假绿 → 退出码 1）

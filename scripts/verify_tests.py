@@ -352,6 +352,29 @@ MUTATIONS: list[Mutation] = [
             "（realm.md 等 4 份文档曾长期这样）",
         tags=["docs"],
     ),
+    # ── Anthropic 工具配对顺序（上游 06e1b46 的同一个 bug）──────────
+    Mutation(
+        name="anthropic-tool-order",
+        file="anthropic_adapter.py",
+        old='            result.append({"role": "user", "content": content})',
+        new='            result.insert(0, {"role": "user", "content": content})',
+        tests=["tests/test_anthropic_tool_ordering.py::ToolOrderingCase"],
+        why="把 user 文本插到 tool 结果之前 → 切断 assistant.tool_calls 与 "
+            "role:tool 的紧邻关系 → 上游报 11148（Claude Code 子 Agent 必现，"
+            "普通对话不触发所以极难发现）",
+        tags=["anthropic", "safety"],
+    ),
+    Mutation(
+        name="anthropic-empty-tool-id",
+        file="anthropic_adapter.py",
+        old=('                if not tc_id or not str(tc_id).strip():\n'
+             '                    continue\n'),
+        new="",
+        tests=["tests/test_anthropic_tool_ordering.py::"
+               "ToolOrderingCase::test_empty_tool_use_id_dropped"],
+        why="保留空 tool_use_id → 上游看到无法配对的 tool 消息，同样 11148",
+        tags=["anthropic", "safety"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

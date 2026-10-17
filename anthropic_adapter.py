@@ -178,17 +178,37 @@ def _convert_anthropic_message(msg: dict) -> list[dict]:
                 content_parts.append(_image_block_to_chat_part(block))
                 has_images = True
             elif bt == "tool_result":
-                # tool_result → 独立的 tool 消息
+                # tool_result → 独立的 tool 消息（必须紧随 assistant.tool_calls）
                 tc_id = block.get("tool_use_id", "")
+                # **空 tool_use_id 必须丢弃**：上游会把它当成一条无法配对的
+                # tool 消息，直接判对话损坏（11148）。
+                if not tc_id or not str(tc_id).strip():
+                    continue
                 output = block.get("content", "")
                 if isinstance(output, list):
                     output = "".join(
                         b.get("text", "") for b in output if isinstance(b, dict) and b.get("type") == "text"
                     )
+                elif not isinstance(output, str):
+                    # 结构异常时转成字符串，别把 dict/list 直接塞进 content
+                    output = "" if output is None else str(output)
                 result.append({"role": "tool", "tool_call_id": tc_id, "content": output})
         if content_parts:
             content = content_parts if has_images else "".join(part["text"] for part in content_parts)
-            result.insert(0, {"role": "user", "content": content})
+            # ⚠️ **必须 append 在 tool 消息之后，不能 insert(0)**。
+            #
+            # OpenAI 协议要求：`assistant.tool_calls` 之后必须**紧接**对应的
+            # `role: tool` 消息，中间不能插任何东西。
+            #
+            # 原来这里是 `result.insert(0, ...)` —— 把用户文本插到 tool 结果
+            # **前面**，切断了配对关系。Claude Code 的子 Agent 会把
+            # `tool_result` 与 `<system-reminder>` 混排在同一条 user 消息里，
+            # 此时上游立刻判「对话损坏」返回 **11148**（工具配对失败）。
+            #
+            # 这个 bug 在普通对话里几乎不会触发（很少有多轮工具调用），
+            # 只在**子 Agent / 并行工具调用**场景必现 —— 极难凭直觉发现。
+            # 上游 06e1b46 修的正是这一处，我们是同一份代码的同一个缺陷。
+            result.append({"role": "user", "content": content})
         return result
 
     # assistant 角色
