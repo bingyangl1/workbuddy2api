@@ -575,7 +575,10 @@
     "catTravelBatchConfirm": "对 {n} 个账号执行猫猫旅行？会真实触达上游。",
     "catTravelBatchStarted": "已启动批量猫猫旅行（{n} 个账号）",
     "catTravelAdopted": "首次领养 +{n}",
-    "catTravelCredits": "领奖 +{n} 积分"
+    "catTravelCredits": "领奖 +{n} 积分",
+    "cooldownClear": "解除本地冷却",
+    "cooldownCleared": "已解除：{items}",
+    "cooldownNone": "该账号当前没有本地冷却/熔断/降权，无需解除"
   },
   "keys": {
     "title": "API 密钥",
@@ -745,7 +748,10 @@
     "viewTitle": "完整密钥",
     "copied": "已复制",
     "createdHint": "完整明文只显示这一次，请立即复制保存。",
-    "createdDone": "我已保存"
+    "createdDone": "我已保存",
+    "fMaxConcurrent": "并发上限",
+    "fMaxConcurrentPh": "留空=跟随全局",
+    "fMaxConcurrentHint": "留空=跟随全局并发；0=不限（可打满，仍受账号在途上限约束）；N=最多 N 路"
   },
   "upstreams": {
     "title": "多上游（账号池分组）",

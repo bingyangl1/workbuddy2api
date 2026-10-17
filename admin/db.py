@@ -184,6 +184,8 @@ def init_db() -> bool:
         _ensure_column("api_keys", "token_quota", "INT", "DEFAULT 0")
         _ensure_column("api_keys", "used_tokens", "INT", "DEFAULT 0")
         _ensure_column("api_keys", "last_used_at", "DATETIME", "NULL")
+        # 每密钥并发上限（NULL=跟随全局 / 0=不限 / N=上限）
+        _ensure_column("api_keys", "max_concurrent", "INT", "NULL")
 
         # 迁移（P2 T6）：usage_logs 记原始请求模型名（别名映射对账）
         _ensure_column("usage_logs", "requested_model", "VARCHAR(120)", "DEFAULT ''")

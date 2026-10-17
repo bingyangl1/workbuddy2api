@@ -599,7 +599,10 @@
     "catTravelBatchConfirm": "Run cat travel for {n} accounts? This hits upstream.",
     "catTravelBatchStarted": "Batch cat travel started ({n} accounts)",
     "catTravelAdopted": "First adoption +{n}",
-    "catTravelCredits": "Claimed +{n} credits"
+    "catTravelCredits": "Claimed +{n} credits",
+    "cooldownClear": "Clear local cooldown",
+    "cooldownCleared": "Cleared: {items}",
+    "cooldownNone": "No local cooldown/breaker/degrade to clear"
   },
   "keys": {
     "title": "API keys",
@@ -769,7 +772,10 @@
     "viewTitle": "Full key",
     "copied": "Copied",
     "createdHint": "Plaintext shown only once — copy it now.",
-    "createdDone": "I've saved it"
+    "createdDone": "I've saved it",
+    "fMaxConcurrent": "Concurrency cap",
+    "fMaxConcurrentPh": "blank = follow global",
+    "fMaxConcurrentHint": "Blank = follow the global cap; 0 = unlimited (still bounded by per-account in-flight); N = at most N concurrent"
   },
   "upstreams": {
     "title": "Multiple upstreams (account pool groups)",

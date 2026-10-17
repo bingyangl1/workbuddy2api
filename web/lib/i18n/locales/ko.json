@@ -575,7 +575,10 @@
     "catTravelBatchConfirm": "{n}개 계정에 고양이 여행을 실행할까요? 업스트림에 실제 요청합니다.",
     "catTravelBatchStarted": "일괄 고양이 여행 시작({n}개 계정)",
     "catTravelAdopted": "첫 입양 +{n}",
-    "catTravelCredits": "보상 +{n} 크레딧"
+    "catTravelCredits": "보상 +{n} 크레딧",
+    "cooldownClear": "로컬 쿨다운 해제",
+    "cooldownCleared": "해제됨: {items}",
+    "cooldownNone": "해제할 로컬 쿨다운/서킷브레이커/강등 상태가 없습니다"
   },
   "keys": {
     "title": "API 키",
@@ -745,7 +748,10 @@
     "viewTitle": "전체 키",
     "copied": "복사됨",
     "createdHint": "평문은 한 번만 표시됩니다. 지금 복사하세요.",
-    "createdDone": "저장했습니다"
+    "createdDone": "저장했습니다",
+    "fMaxConcurrent": "동시 실행 상한",
+    "fMaxConcurrentPh": "비우면 전역 설정 따름",
+    "fMaxConcurrentHint": "비우면 전역 상한을 따름; 0 = 무제한(계정 단위 상한은 적용); N = 최대 N 동시"
   },
   "upstreams": {
     "title": "다중 업스트림(계정 풀 그룹)",

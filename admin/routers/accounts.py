@@ -640,6 +640,76 @@ def clear_model_limit(acc_id: int, body: ClearModelLimit,
     return {"ok": True, "cleared": count}
 
 
+@router.post("/{acc_id}/cooldown/clear")
+def clear_account_cooldown(acc_id: int, _: bool = Depends(require_admin),
+                           db: Session = Depends(get_db),
+                           request: Request = None):
+    """一键解除账号的**本地**冷却 / 熔断 / 降权状态。
+
+    ## 什么时候用
+
+    账号进入冷却通常是因为上游真的返回了限流/错误 —— 那时等它自己恢复是对的。
+    但有几类场景是**误判**，干等只会白白少一个可用账号：
+
+      * 上游临时抖动（网络闪断被计成失败）→ `cool_until` 被设了几分钟
+      * 熔断阈值偏保守（连续几次 5xx 就熔断 10 分钟）
+      * 降权（`degrade_until`）在容量恢复后仍持续
+      * 人工排查完确认号没问题，想立刻放回池子
+
+    此前只能改库或等，界面上「账号冷却中」没有任何出口。
+
+    ## 清哪些、不清哪些（重要）
+
+    **清**：`cool_until` / `cool_kind` / `breaker_until` / `breaker_fails` /
+    `degrade_until` —— 这些都是**本地推断的状态**，可以安全重置。
+
+    **不清**：`session_dead_fails`（凭证失效的权威计数）与 `consecutive_fails`。
+    理由：`session_dead` 来自上游 401/403，是**凭证真的废了**的权威信号，
+    一键清掉会让死号立刻被重新选中、反复 401，把整个池子拖慢；
+    这个计数只能通过「重新导入有效凭证」来清（那才是真的修好了）。
+
+    同理**不改 `status`**：停用是人工决策，解除冷却不等于重新启用。
+
+    ## 返回
+
+    `cleared` 列出**实际被清理的项**（清之前有值的那些），没清到的项不出现 ——
+    这样前端能如实告诉用户「这次到底动到了什么」，而不是一律报「已重置」。
+    """
+    acc = db.query(Account).filter(Account.id == acc_id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="账号不存在")
+
+    cleared: list[str] = []
+    if acc.cool_until is not None or acc.cool_kind:
+        cleared.append("cool")
+    if acc.breaker_until is not None or (acc.breaker_fails or 0) > 0:
+        cleared.append("breaker")
+    if acc.degrade_until is not None:
+        cleared.append("degraded")
+
+    acc.cool_until = None
+    acc.cool_kind = ""
+    acc.breaker_until = None
+    acc.breaker_fails = 0
+    acc.degrade_until = None
+    db.commit()
+
+    log_request(current_actor(), "clear_cooldown", target=f"{acc.id}:{acc.name}",
+                detail=",".join(cleared) or "none", request=request)
+    # 注意：session_dead_fails / status 有意不动（见 docstring）
+    return {
+        "id": acc.id,
+        "ok": True,
+        "cleared": cleared,
+        "kept": {
+            "session_dead_fails": int(acc.session_dead_fails or 0),
+            "status": acc.status,
+        },
+        "message": (f"已解除：{'、'.join(cleared)}" if cleared
+                    else "该账号当前没有本地冷却/熔断/降权状态，无需解除"),
+    }
+
+
 @router.post("")
 def add_account(body: AccountIn, _: bool = Depends(require_admin), db: Session = Depends(get_db),
                 request: Request = None):

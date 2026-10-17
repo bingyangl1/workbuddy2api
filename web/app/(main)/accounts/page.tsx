@@ -776,6 +776,32 @@ function ToolsDialog({open, onClose, onChanged}: {
     }
   }
 
+  /**
+   * 一键解除该账号的本地冷却/熔断/降权。
+   *
+   * 只清本地推断的状态；`session_dead_fails`（上游 401/403 的权威信号）与
+   * `status`（人工停用决策）**不会**被动到 —— 后端已保证这点。
+   *
+   * 提示语按 `cleared` 如实反馈：没清到东西时明确说「无需解除」，
+   * 不弹「已重置」（那会让用户误以为发生了什么）。
+   */
+  async function clearCooldown(accountId: number) {
+    setBusy(`cool-${accountId}`);
+    try {
+      const r = await accountApi.clearCooldown(accountId);
+      if (r.cleared.length) {
+        notify.ok(t('accounts.cooldownCleared', {items: r.cleared.join(', ')}));
+      } else {
+        notify.ok(t('accounts.cooldownNone'));
+      }
+      await load();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function doExport() {
     setBusy('export');
     try {
@@ -843,11 +869,23 @@ function ToolsDialog({open, onClose, onChanged}: {
                         <TableCell className="text-sm">{l.account_name || `#${l.account_id}`}</TableCell>
                         <TableCell className="font-mono text-xs">{l.model}</TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm"
-                                  disabled={busy === `clear-${l.account_id}`}
-                                  onClick={() => clearLimit(l.account_id)}>
-                            {t('accounts.limitClear')}
-                          </Button>
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <Button variant="ghost" size="sm"
+                                    disabled={busy === `clear-${l.account_id}`}
+                                    onClick={() => clearLimit(l.account_id)}>
+                              {t('accounts.limitClear')}
+                            </Button>
+                            {/* 本地冷却/熔断/降权的一键解除。
+                                与「模型级限流」是两个维度：那个清的是
+                                AccountModelCooldown 行，这个清的是账号上的
+                                cool_until/breaker/degrade。两者都可能让账号
+                                看起来「不可用」，所以放在一起便于判断。 */}
+                            <Button variant="ghost" size="sm"
+                                    disabled={busy === `cool-${l.account_id}`}
+                                    onClick={() => clearCooldown(l.account_id)}>
+                              {t('accounts.cooldownClear')}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

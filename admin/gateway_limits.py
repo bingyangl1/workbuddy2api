@@ -79,8 +79,39 @@ def _limits():
     return max(0, int(getattr(settings, "GATEWAY_RATE_PER_MINUTE", 0))), max(0, int(getattr(settings, "GATEWAY_MAX_CONCURRENT", 0)))
 
 
-def allow(key):
+def resolve_concurrent(global_limit: int, per_key) -> int:
+    """把「全局上限」与「每密钥覆盖」合成该密钥的并发上限（纯函数，便于测试）。
+
+    | `per_key` | 含义 | 结果 |
+    |---|---|---|
+    | `None`  | 未设置（**存量密钥都是这个**） | `global_limit`（跟随全局，零回归） |
+    | `0`     | 显式不限 | `0`（不限制该密钥） |
+    | `N > 0` | 最多 N 路 | `N` |
+
+    负数按非法处理（回落到全局），避免脏数据把闸门算成负数。
+    """
+    if per_key is None:
+        return global_limit
+    try:
+        n = int(per_key)
+    except (TypeError, ValueError):
+        return global_limit
+    if n < 0:
+        return global_limit
+    return n
+
+
+def allow(key, per_key_concurrent=None):
+    """申请一路准入。
+
+    `per_key_concurrent` 是该密钥的并发覆盖值（`api_keys.max_concurrent`）：
+    None=跟随全局 / 0=不限 / N=上限。见 `resolve_concurrent`。
+
+    **它只影响并发**，不影响速率 —— `GATEWAY_RATE_PER_MINUTE` 仍是全局口径
+    （速率是「对外配额」，与「单密钥能开几路」是两件事）。
+    """
     rate, concurrent = _limits()
+    concurrent = resolve_concurrent(concurrent, per_key_concurrent)
     if not key or (not rate and not concurrent):
         return Admission(None)
     client = _redis_client()
@@ -139,11 +170,18 @@ def snapshot():
 
 
 def _valid_key_id(token):
+    """校验密钥并返回 `(key_id, max_concurrent)`；无效返回 None。
+
+    为什么一次返回两个值：中间件本来就要查一次库做鉴权，顺手把
+    `max_concurrent` 带回来，避免为了拿这个字段再查一次（网关是热路径）。
+    """
     from admin.db import SessionLocal
     from admin.security import get_key_row
     with SessionLocal() as db:
         row = get_key_row(db, token)
-        return str(row.id) if row and row.status == "active" else None
+        if not row or row.status != "active":
+            return None
+        return str(row.id), getattr(row, "max_concurrent", None)
 
 
 async def _finish_thread(fn, *args):
@@ -161,7 +199,10 @@ class GatewayAdmissionMiddleware:
 
     async def __call__(self, scope, receive, send):
         from starlette.responses import JSONResponse
-        if scope['type'] != 'http' or not scope.get('path', '').startswith('/v1/') or not any(_limits()):
+        # 全局两个闸都为 0 时直接放行 —— 但**不能就此短路**：
+        # 某个密钥可能单独设了 `max_concurrent`（全局未开、per-key 开了的生僻配置）。
+        # 所以这里只做「路径都不对」的快速跳出，per-key 值在拿到 key 后再判。
+        if scope['type'] != 'http' or not scope.get('path', '').startswith('/v1/'):
             return await self.app(scope, receive, send)
         headers = dict(scope.get('headers', []))
         token = headers.get(b'x-api-key', b'').decode('latin1')
@@ -169,10 +210,12 @@ class GatewayAdmissionMiddleware:
             auth = headers.get(b'authorization', b'').decode('latin1')
             token = auth[7:].strip() if auth.startswith('Bearer ') else ''
         # Only authenticated IDs enter the bounded state, never raw client tokens.
-        key = await _finish_thread(_valid_key_id, token) if token else None
-        if key is None:
+        # 顺带取回该密钥的并发覆盖值，避免为了这个字段再查一次库。
+        ident = await _finish_thread(_valid_key_id, token) if token else None
+        if ident is None:
             return await self.app(scope, receive, send)
-        pending = asyncio.create_task(asyncio.to_thread(allow, key))
+        key, per_key = ident
+        pending = asyncio.create_task(asyncio.to_thread(allow, key, per_key))
         try:
             result = await asyncio.shield(pending)
         except asyncio.CancelledError:

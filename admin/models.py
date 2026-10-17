@@ -154,6 +154,19 @@ class ApiKey(Base):
     # Token 配额：0 = 不限（0 不可能是有效配额）。仅计上游真实返回的 total_tokens
     token_quota = Column(Integer, default=0)
     used_tokens = Column(Integer, default=0)
+    # 每密钥并发上限（覆盖全局 GATEWAY_MAX_CONCURRENT）。
+    #
+    #   NULL = 跟随全局（存量默认，零回归）
+    #   0    = 不限（该密钥可以打满，仍受账号层 ADMIN_POOL_MAX_IN_FLIGHT 约束）
+    #   N    = 该密钥最多 N 路并发
+    #
+    # 为什么需要它：全局并发是「所有密钥共享」的总闸。一个跑批客户端
+    # （并发 5 路）会把默认 4 路的全局额度占满，其他密钥全部排队 ——
+    # 明明那不是他们的额度问题。per-key 覆盖让重度/轻度用户互不干扰。
+    #
+    # 注意：本字段只管**网关准入**；账号层在途上限（ADMIN_POOL_MAX_IN_FLIGHT）
+    # 是独立约束 —— 单号被打满时仍会 503，那是账号维度的保护，不该被绕过。
+    max_concurrent = Column(Integer, nullable=True)
     # 最近一次成功发起请求的时间（touch() 落库，60s 节流之外始终精确到请求级）
     last_used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

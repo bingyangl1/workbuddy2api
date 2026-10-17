@@ -32,6 +32,29 @@ class KeyIn(BaseModel):
     max_ips: int = 0                    # 0 = 不限
     ip_allowlist: list[str] = []        # 单 IP 或 CIDR；空 = 不限
     token_quota: int = 0                # 0 = 不限（0 不可能是有效配额）
+    # 每密钥并发上限：None=跟随全局 / 0=不限 / N=上限。
+    # 用 None 而不是 0 作默认，才能区分「没设置」与「显式不限」。
+    max_concurrent: int | None = None
+
+
+def _validate_concurrent(raw) -> int | None:
+    """校验每密钥并发上限：None / 0 / 正整数，其余 400。
+
+    为什么负数要拒而不是当 0：负数没有任何合理语义，静默当 0（=不限）
+    会让「本想限制」的配置变成「完全不限」—— 那是相反的效果。
+    """
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail=f"max_concurrent 必须是整数或留空，收到：{raw!r}")
+    if n < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="max_concurrent 不能为负（留空=跟随全局，0=不限，正整数=上限）")
+    return n
 
 
 def _parse_expires(raw: str | None) -> datetime | None:
@@ -112,6 +135,9 @@ def list_keys(_: bool = Depends(require_admin_read), db: Session = Depends(get_d
             "bound_ips": db.query(ApiKeyIp).filter(ApiKeyIp.key_id == k.id).count(),
             "token_quota": int(k.token_quota or 0),
             "used_tokens": int(k.used_tokens or 0),
+            # 每密钥并发上限：None = 跟随全局（前端据此显示「跟随全局」而不是 0）
+            "max_concurrent": (None if getattr(k, "max_concurrent", None) is None
+                               else int(k.max_concurrent)),
             "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
             "created_at": k.created_at.isoformat() if k.created_at else None,
         }
@@ -149,6 +175,7 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
         max_ips=int(body.max_ips or 0),
         ip_allowlist=json.dumps(_norm_cidrs(body.ip_allowlist)),
         token_quota=int(body.token_quota or 0),
+        max_concurrent=_validate_concurrent(body.max_concurrent),
     )
     db.add(k)
     db.commit()
@@ -173,6 +200,8 @@ def create_key(body: KeyIn, _: bool = Depends(require_admin), db: Session = Depe
         "max_ips": int(k.max_ips or 0),
         "ip_allowlist": key_ip_allowlist(k),
         "token_quota": int(k.token_quota or 0),
+        "max_concurrent": (None if getattr(k, "max_concurrent", None) is None
+                           else int(k.max_concurrent)),
     }
 
 
@@ -251,6 +280,9 @@ def patch_key(key_id: int, body: dict, _: bool = Depends(require_admin), db: Ses
         k.ip_allowlist = json.dumps(_norm_cidrs(body["ip_allowlist"]))
     if "token_quota" in body:
         k.token_quota = int(body["token_quota"] or 0)
+    if "max_concurrent" in body:
+        # 显式传 null = 改回「跟随全局」（所以用「键在不在」判断，不用真值）
+        k.max_concurrent = _validate_concurrent(body["max_concurrent"])
     if body.get("reset_used"):
         # 与 manager reset_usage 同口径：两个量一起归零——界面上是同一个
         # 「重置用量」按钮，只清积分不清 token 会留下看不见的残留额度

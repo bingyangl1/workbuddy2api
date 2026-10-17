@@ -575,7 +575,10 @@
     "catTravelBatchConfirm": "對 {n} 個帳號執行貓貓旅行？會真實觸達上游。",
     "catTravelBatchStarted": "已啟動批量貓貓旅行（{n} 個帳號）",
     "catTravelAdopted": "首次領養 +{n}",
-    "catTravelCredits": "領獎 +{n} 積分"
+    "catTravelCredits": "領獎 +{n} 積分",
+    "cooldownClear": "解除本地冷卻",
+    "cooldownCleared": "已解除：{items}",
+    "cooldownNone": "該帳號目前沒有本地冷卻/熔斷/降權，無需解除"
   },
   "keys": {
     "title": "API 金鑰",
@@ -745,7 +748,10 @@
     "viewTitle": "完整金鑰",
     "copied": "已複製",
     "createdHint": "完整明文只顯示這一次，請立即複製保存。",
-    "createdDone": "我已保存"
+    "createdDone": "我已保存",
+    "fMaxConcurrent": "並發上限",
+    "fMaxConcurrentPh": "留空=跟隨全域",
+    "fMaxConcurrentHint": "留空=跟隨全域並發；0=不限（可打滿，仍受帳號在途上限約束）；N=最多 N 路"
   },
   "upstreams": {
     "title": "多上游（帳號池分組）",

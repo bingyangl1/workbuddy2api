@@ -23,26 +23,40 @@ def normalize_response(models, response):
     return levels
 
 
-def get_busy_levels(db, models):
+def get_busy_levels(db, models, realm: str = ""):
+    """查上游的模型繁忙程度。
+
+    `realm`（''/cn/global）限定用哪一版的账号去问 —— **两版的上游是两个域**，
+    繁忙程度也是各自独立的事实：拿国内版账号问出来的繁忙度去标注国际版模型，
+    数值本身就是错的。不传则不限（既有行为，零回归）。
+    """
     from admin import backend
     from admin.models import Account
     from sqlalchemy import or_
 
     models = sorted(set(models))
     now = datetime.utcnow()
-    account = db.query(Account).filter(Account.status == "active", *[
+    q = db.query(Account).filter(Account.status == "active", *[
         or_(getattr(Account, field).is_(None), getattr(Account, field) <= now)
         for field in ("cool_until", "breaker_until", "degrade_until")
-    ]).order_by(Account.id).first()
+    ])
+    r = (realm or "").strip().lower()
+    if r in ("cn", "global"):
+        q = q.filter(Account.realm == r)
+    account = q.order_by(Account.id).first()
     unknown = {m: "unknown" for m in models}
     if not models or not account:
-        return {"levels": unknown, "observed_at": None, "stale": True}
+        return {"levels": unknown, "observed_at": None, "stale": True, "realm": r or "all"}
     # Cache is scoped to the upstream identity and the requested model set.
+    # （`account.id` 已隐含 realm —— 不同版本的账号必然不同，所以按账号分键
+    #   就够了，不必再往 key 里塞 realm。）
     key = (account.id, account.uid, tuple(models))
     with _lock:
         cached = _cache.get(key)
         if cached and time.monotonic() - cached["checked"] < CACHE_SECONDS:
-            return {k: v for k, v in cached.items() if k != "checked"}
+            out = {k: v for k, v in cached.items() if k != "checked"}
+            out["realm"] = r or "all"
+            return out
         levels = {}
         try:
             with backend.AccountSession(account.auth_json) as session:
@@ -53,12 +67,14 @@ def get_busy_levels(db, models):
                 finally:
                     account.auth_json = session.updated_json()
             db.commit()
-            result = {"levels": levels, "observed_at": datetime.utcnow().isoformat() + "Z", "stale": False}
+            result = {"levels": levels, "observed_at": datetime.utcnow().isoformat() + "Z",
+                      "stale": False, "realm": r or "all"}
         except Exception:
             db.rollback()
             _logger.warning("上游模型繁忙程度获取失败，使用缓存或未知状态")
             result = {"levels": cached["levels"] if cached else unknown,
-                      "observed_at": cached["observed_at"] if cached else None, "stale": True}
+                      "observed_at": cached["observed_at"] if cached else None,
+                      "stale": True, "realm": r or "all"}
         # Negative caching also prevents repeated failed requests from every admin view.
         _cache.clear()
         _cache[key] = {**result, "checked": time.monotonic()}

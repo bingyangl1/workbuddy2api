@@ -340,6 +340,9 @@ function KeyEditDialog({target, modelGroups, accGroups, onClose, onCreated, onSa
     name: '', note: '', credit_limit: '0', unlimited: false,
     group_id: '0', account_group_id: '0', realm: '',
     expires_at: '', max_ips: '0', ip_allowlist: '', token_quota: '0',
+    // 并发上限用**字符串**存：''=跟随全局 / '0'=不限 / 'N'=上限。
+    // 用 '' 而不是 '0' 表示「未设置」—— 两者语义相反（见 lib/types.ts 注释）。
+    max_concurrent: '',
   });
   const [busy, setBusy] = useState(false);
 
@@ -355,11 +358,14 @@ function KeyEditDialog({target, modelGroups, accGroups, onClose, onCreated, onSa
         max_ips: String(editing.max_ips || 0),
         ip_allowlist: editing.ip_allowlist.join('\n'),
         token_quota: String(editing.token_quota || 0),
+        max_concurrent: editing.max_concurrent == null
+          ? '' : String(editing.max_concurrent),
       });
     } else {
       setForm({name: '', note: '', credit_limit: '0', unlimited: false,
                group_id: '0', account_group_id: '0', realm: '',
-               expires_at: '', max_ips: '0', ip_allowlist: '', token_quota: '0'});
+               expires_at: '', max_ips: '0', ip_allowlist: '', token_quota: '0',
+               max_concurrent: ''});
     }
   }, [target]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -379,6 +385,11 @@ function KeyEditDialog({target, modelGroups, accGroups, onClose, onCreated, onSa
       max_ips: Number(form.max_ips) || 0,
       ip_allowlist: form.ip_allowlist.split('\n').map((s) => s.trim()).filter(Boolean),
       token_quota: Number(form.token_quota) || 0,
+      // '' → null（跟随全局）；'0' → 0（不限）；'N' → N。
+      // 注意不能写成 `Number(form.max_concurrent) || null` —— 那样 '0' 也会变成
+      // null（跟随全局），「显式不限」这个状态就永远表达不出来。
+      max_concurrent: form.max_concurrent.trim() === ''
+        ? null : (Number(form.max_concurrent) || 0),
     };
     try {
       if (isNew) {
@@ -475,6 +486,18 @@ function KeyEditDialog({target, modelGroups, accGroups, onClose, onCreated, onSa
             <Label>{t('keys.fTokenQuota')}</Label>
             <Input type="number" min={0} value={form.token_quota}
                    onChange={(e) => set('token_quota')(e.target.value)} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>{t('keys.fMaxConcurrent')}</Label>
+            <Input type="number" min={0} value={form.max_concurrent}
+                   placeholder={t('keys.fMaxConcurrentPh')}
+                   onChange={(e) => set('max_concurrent')(e.target.value)} />
+            {/* 留空=跟随全局 / 0=不限 / N=上限 —— 三态语义必须在界面上讲清，
+                否则用户会以为「留空」和「填 0」是一回事（它们相反）。 */}
+            <p className="text-[10px] text-muted-foreground">
+              {t('keys.fMaxConcurrentHint')}
+            </p>
           </div>
 
           <div className="space-y-1.5">

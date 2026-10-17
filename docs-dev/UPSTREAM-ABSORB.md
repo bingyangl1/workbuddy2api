@@ -153,18 +153,31 @@ git diff HEAD upstream/master -- admin/pool.py
 
 ### ⬜ 待办
 
-3. **候选吸收 3 项**（独立小功能，低风险、不侵入既有逻辑）：
-   * `8ae5c2df` 每 API Key 并发数（`ApiKey.max_concurrent`：NULL=全局 / 0=不限 / N=上限）
-     —— 我们**已有全局**并发限制，缺 per-key 覆盖。上游痛点：并发 5 路时易挤爆全局默认 4 路
-   * `dcf640fc` 冷却一键解除（`POST /api/accounts/{id}/cooldown/clear`，清 cool/breaker/degrade）
-   * `7bed6e3a` 桌面端系统托盘（托盘菜单 / 状态徽章 / 自启开关）
+3. **候选吸收 3 项** —— **2 项已完成**：
+   * ✅ `8ae5c2df` 每 API Key 并发数 → `api_keys.max_concurrent`
+     （NULL=跟随全局 / 0=不限 / N=上限）。痛点确实是全局闸被单个跑批客户端占满
+   * ✅ `dcf640fc` 冷却一键解除 → `POST /api/accounts/{id}/cooldown/clear`
+     （清 cool/breaker/degrade；**不清** `session_dead_fails` 与 `status`）
+   * ⬜ `7bed6e3a` 桌面端系统托盘（属 P6 桌面 UI 范畴，未开始）
 4. **新功能块**（需新增模块 + 面板页，工作量较大，待决策）：
-   * 每日权益领取（`eb0b1a16` / `98e5a930`）
-   * DeepSeek 补偿领取（`c8d816d2`）
-   * 成长中心（`50c1f906` 的 `growth_center.py` / `growth_plan.py`）
+   * ⬜ 每日权益领取（`eb0b1a16` / `98e5a930`）
+   * ⬜ DeepSeek 补偿领取（`c8d816d2`）
+   * ⬜ 成长中心（`50c1f906` 的 `growth_center.py` / `growth_plan.py`）
 5. **小项待评估**：
-   * `0c982bf8` 保留 Anthropic 图片 + 规范化 Zcode 工具选择
-   * `12278a24` 排队 onboarding 任务（`post_login.py`）
+   * ⬜ `0c982bf8` 保留 Anthropic 图片 + 规范化 Zcode 工具选择
+   * ⬜ `12278a24` 排队 onboarding 任务（`post_login.py`）
+
+### ✅ 本轮额外自查出的 fork 自身 bug（非上游项）
+
+排查 realm 覆盖时顺带发现并修掉 4 个**我们自己的** realm 缺口
+（上游没有这些问题，因为它是单域设计）：
+
+| 位置 | 问题 | 影响 |
+|---|---|---|
+| `_candidate_dirs()` 显式覆盖 | 无视 realm 过滤 | **国际版带整套国内版身份出站** |
+| `REALM_FALLBACKS` | 漏 `desktop_version` | 探测不到时 UA 版本段错（`workbuddy-ai/5.8.3`） |
+| `/api/models/busy` 模型清单 | 取全表不分 realm | 国际版查国内版模型 → 上游报错 → 一屏 `unknown` |
+| `/api/models/speed-test` | 出站 URL 写死 `settings.BACKEND` | 国际版账号打国内版端点 → 必然失败 |
 
 ---
 

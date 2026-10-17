@@ -143,6 +143,17 @@ export interface ApiKey {
   bound_ips: number;          // 已绑定 IP 数（max_ips 生效中）
   token_quota: number;        // 0 = 不限
   used_tokens: number;
+  /**
+   * 每密钥并发上限（覆盖全局 `GATEWAY_MAX_CONCURRENT`）。
+   *
+   * `null` = 未设置 → **跟随全局**（存量密钥都是这个）
+   * `0`    = 显式不限（该密钥可以打满，仍受账号层在途上限约束）
+   * `N>0`  = 最多 N 路
+   *
+   * 为什么用 `null` 而不是 `0` 表示「未设置」：两者语义相反 ——
+   * `0` 是「不限」、`null` 是「听全局的」。混用会让全局闸门形同虚设。
+   */
+  max_concurrent: number | null;
   last_used_at: string | null;
   created_at: string | null;
 }

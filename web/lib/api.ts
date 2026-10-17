@@ -172,6 +172,20 @@ export const accountApi = {
   modelLimits: () => get<{items: ModelLimitRow[]}>('/api/accounts/model-limits'),
   clearModelLimit: (id: number) =>
     post<{ok: boolean; cleared: number}>(`/api/accounts/${id}/model-limits/clear`),
+  /**
+   * 一键解除该账号的**本地**冷却 / 熔断 / 降权。
+   *
+   * 只清本地推断的状态（`cool_until` / `breaker_until` / `breaker_fails` /
+   * `degrade_until`）。**不动** `session_dead_fails`（上游 401/403 的权威信号，
+   * 清了会让死号反复被选中）与 `status`（停用是人工决策）。
+   *
+   * 返回的 `cleared` 是**实际清掉的项**；没清到时为空数组 —— 前端据此如实提示，
+   * 不要一律弹「已重置」。
+   */
+  clearCooldown: (id: number) =>
+    post<{id: number; ok: boolean; cleared: string[];
+          kept: {session_dead_fails: number; status: string}; message: string}>(
+      `/api/accounts/${id}/cooldown/clear`),
   /** uid 重复分组（每组 keep=最早创建保留，remove=可清理冗余）。 */
   duplicates: () => get<{total: number; unique: number; redundant: number;
                         groups: {uid: string; keep: DupRef; remove: DupRef[]}[]}>(
@@ -227,6 +241,11 @@ export interface KeyPayload {
   max_ips?: number;             // 0 = 不限
   ip_allowlist?: string[];      // CIDR/单 IP；空 = 不限
   token_quota?: number;         // 0 = 不限
+  /**
+   * 每密钥并发上限：`null`/省略 = 跟随全局；`0` = 不限；`N>0` = 最多 N 路。
+   * 显式传 `null` 会把已有值清回「跟随全局」。
+   */
+  max_concurrent?: number | null;
   reset_used?: boolean;         // true = credit_used + used_tokens 一起归零
 }
 export const keyApi = {
@@ -262,13 +281,26 @@ export const modelApi = {
     post<{realm: string; source_account_id: number; total_fetched: number;
           added: number; updated: number; total_in_db: number; enabled: number}>(
       '/api/models/sync', {realm}),
-  busy: () => get<ModelBusyResponse>('/api/models/busy'),
+  /**
+   * 上游模型繁忙程度。
+   *
+   * `realm` 限定用哪一版账号去问：**两版的上游是两个域**，繁忙度是各自独立的
+   * 事实 —— 拿国内版的值去标注国际版模型，数字本身就是错的。
+   */
+  busy: (realm: string = '') =>
+    get<ModelBusyResponse>('/api/models/busy', realm ? {realm} : undefined),
   // 模型中心目录（P4）：按 realm 直连腾讯，含 source 来源标注
   catalog: (realm: string = 'cn', force = false) =>
     get<ModelCatalogResponse>('/api/models/catalog', {realm, ...(force ? {force: true} : {})}),
-  // 契约：{model, max_tokens?, messages?} → SpeedTestResult（真实上游请求，约 2-10s）
-  speedTest: (model: string, max_tokens = 256) =>
-    post<SpeedTestResult>('/api/models/speed-test', {model, max_tokens}),
+  /**
+   * 用账号池直调上游测一次速（真实请求，约 2-10s）。
+   *
+   * `realm` 限定用哪一版账号：后端会**按账号 realm 决定出站基址**
+   * （原实现写死国内版基址 → 国际版账号测速会打国内版端点，直接判非法）。
+   */
+  speedTest: (model: string, max_tokens = 256, realm = '') =>
+    post<SpeedTestResult>('/api/models/speed-test',
+                          {model, max_tokens, ...(realm ? {realm} : {})}),
   // 模型分组（/api/groups，GroupIn = {name, note, models[]} 全量覆盖语义）
   groups: () => get<{items: ModelGroup[]}>('/api/groups'),
   createGroup: (body: {name: string; note?: string; models: string[]}) =>

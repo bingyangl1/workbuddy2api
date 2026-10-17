@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from admin import backend
+from admin import backend, realm as realm_mod
 from admin.config import settings
 from admin.db import get_db
 from admin.models import Account, ModelConfig
@@ -89,14 +89,55 @@ def list_configs(
 
 
 @router.get("/busy")
-def model_busy(_: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
-    """Upstream capacity is independent of local enablement and cooldowns."""
+def model_busy(realm: str = "",
+               _: bool = Depends(require_admin_read), db: Session = Depends(get_db)):
+    """上游模型繁忙程度。
+
+    `realm` 限定用哪一版账号去问：**两版的上游是两个域**，繁忙程度是各自
+    独立的事实 —— 拿国内版账号问出来的数值去标注国际版模型，数字本身就是错的。
+    不传则不限（既有行为，零回归）。
+
+    **模型清单也必须按 realm 过滤**（真 bug）：原先这里取 `ModelConfig` 全表，
+    两版混在一起。实测两版清单交集只有 5 个（cn 32 个 / global 18 个，
+    国际版全是 `default-model` / `balanced-model` 这种，国内版是 `hy3` /
+    `hy4-preview` 那套）→ 把国内版模型 id 发给国际版账号，上游根本不认识
+    → 请求失败 → 返回 `stale=True`（前端显示一屏 unknown）。
+    """
     from admin.model_busy import get_busy_levels, LABELS
-    models = [row.model_id for row in db.query(ModelConfig.model_id).distinct().all()]
-    result = get_busy_levels(db, models)
+    models = _models_for_realm(db, realm)
+    result = get_busy_levels(db, models, realm=realm)
     return {"items": [{"model_id": model, "busy_level": level, "busy_label": LABELS[level]}
                       for model, level in result["levels"].items()],
-            "observed_at": result["observed_at"], "stale": result["stale"]}
+            "observed_at": result["observed_at"], "stale": result["stale"],
+            "realm": result.get("realm", realm or "all"),
+            "model_count": len(models)}
+
+
+def _models_for_realm(db: Session, realm: str) -> list[str]:
+    """该 realm 下的模型 id 列表。
+
+    国内版历史上用**无前缀**形态存储（`global:` 前缀只给国际版），
+    所以过滤规则是：
+
+        realm=global → 只取 `global:` 开头的，并去掉前缀（上游认裸名）
+        realm=cn     → 取无前缀的 + `cn:` 开头的（兼容显式加前缀的写法）
+        realm=''     → 全表（既有行为）
+
+    去掉前缀很重要：`ModelConfig.model_id` 是**本地**的隔离标记，
+    上游只认裸模型名。
+    """
+    from sqlalchemy import or_
+    q = db.query(ModelConfig.model_id).distinct()
+    r = (realm or "").strip().lower()
+    if r == "global":
+        rows = q.filter(ModelConfig.model_id.like("global:%")).all()
+        return [str(x[0])[len("global:"):] for x in rows]
+    if r == "cn":
+        rows = q.filter(or_(~ModelConfig.model_id.like("%:%"),
+                            ModelConfig.model_id.like("cn:%"))).all()
+        return [str(x[0])[len("cn:"):] if str(x[0]).startswith("cn:") else str(x[0])
+                for x in rows]
+    return [str(x[0]) for x in q.all()]
 
 
 def _pick_sync_account(db: Session, realm: str) -> Account | None:
@@ -317,6 +358,11 @@ async def speed_test(
 
     测量指标：首字延迟 TTFT、输出 token 数、生成速度(t/s)、端到端耗时。
     仅占用一个可用账号做一次真实上游请求，不扣积分、不改额度。
+
+    `body.realm`（可选）限定用哪一版的账号测速。不传则不限（既有行为）。
+
+    ⚠️ **会真实请求上游** —— 与 `/api/accounts/credits/sync` 同级，
+    频繁调用同样是明显的机器特征。
     """
     model = (body.get("model") or "").strip()
     if not model:
@@ -326,25 +372,41 @@ async def speed_test(
     except (TypeError, ValueError):
         max_tokens = 256
     messages = body.get("messages") or _SPEED_TEST_PROMPT
+    realm = (body.get("realm") or "").strip().lower()
+    if realm not in ("", "cn", "global"):
+        raise HTTPException(status_code=400, detail="realm 只能是 cn / global / 留空")
 
     # 选可用账号（与代理一致：active 且余额>0，剩余最多优先）
-    acc = db.query(Account).filter(
-        Account.status == "active", Account.balance_remain > 0
-    ).order_by(Account.balance_remain.desc()).first()
+    q = db.query(Account).filter(
+        Account.status == "active", Account.balance_remain > 0)
+    if realm:
+        q = q.filter(Account.realm == realm)
+    acc = q.order_by(Account.balance_remain.desc()).first()
     if not acc:
         # 文案如实：这个接口只挑「启用且余额>0」，**不看在途/冷却**，
         # 所以「全部禁用或额度耗尽」这句话经常是错的（例如账号只是被临时限流）。
         total = db.query(Account).count()
         active = db.query(Account).filter(Account.status == "active").count()
+        label = {"cn": "国内版", "global": "国际版"}.get(realm, "")
         raise HTTPException(
             status_code=503,
-            detail=(f"无可用账号：共 {total} 个账号，其中启用 {active} 个，"
+            detail=(f"无可用账号{('（' + label + '）') if label else ''}："
+                    f"共 {total} 个账号，其中启用 {active} 个，"
                     f"但没有任何「启用且余额大于 0」的账号"
                     f"（本接口不判断在途与冷却状态）"))
 
+    # 出站基址必须**按账号 realm 决定**。
+    #
+    # 原实现写死 `f"{settings.BACKEND}/v2/chat/completions"` —— settings.BACKEND
+    # 是国内版基址，于是拿国际版账号测速会把请求发到**国内版端点**：
+    # 凭证是国际版的、端点却是国内的，上游直接判非法（而且冷却/错误计数
+    # 会记到那个无辜的国际版账号上）。
+    acc_realm = (getattr(acc, "realm", "") or "cn").strip().lower()
+    base = realm_mod.chat_base(acc_realm)
+    paths = realm_mod.chat_paths(acc_realm)
     sess = backend.AccountSession(acc.auth_json)
     headers = sess.get_headers()
-    url = f"{settings.BACKEND}/v2/chat/completions"
+    url = base + paths[0]
     payload = {
         "model": model,
         "messages": messages,

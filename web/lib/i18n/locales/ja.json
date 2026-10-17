@@ -575,7 +575,10 @@
     "catTravelBatchConfirm": "{n} 個のアカウントで猫の旅を実行しますか？上流に実際にアクセスします。",
     "catTravelBatchStarted": "一括猫の旅を開始しました（{n} アカウント）",
     "catTravelAdopted": "初回養子縁組 +{n}",
-    "catTravelCredits": "報酬 +{n} クレジット"
+    "catTravelCredits": "報酬 +{n} クレジット",
+    "cooldownClear": "ローカル冷却を解除",
+    "cooldownCleared": "解除しました：{items}",
+    "cooldownNone": "解除すべきローカル冷却/サーキットブレーカー/降格はありません"
   },
   "keys": {
     "title": "API キー",
@@ -745,7 +748,10 @@
     "viewTitle": "完全なキー",
     "copied": "コピーしました",
     "createdHint": "平文は一度だけ表示されます。今すぐコピーしてください。",
-    "createdDone": "保存しました"
+    "createdDone": "保存しました",
+    "fMaxConcurrent": "同時実行上限",
+    "fMaxConcurrentPh": "空欄=グローバルに従う",
+    "fMaxConcurrentHint": "空欄=グローバル上限に従う；0=無制限（アカウント単位の上限は適用）；N=最大 N 同時"
   },
   "upstreams": {
     "title": "複数アップストリーム（アカウントプールのグループ）",
