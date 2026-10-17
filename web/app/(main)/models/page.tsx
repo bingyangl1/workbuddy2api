@@ -63,9 +63,12 @@ export default function ModelsPage() {
     setError('');
     try {
       const [cRes, gRes, bRes] = await Promise.all([
-        modelApi.configs(),
+        // **必须传 realm**：后端按 realm 过滤模型清单。
+        // 不传会拿到两版混合的大杂烩（交集只有 5 个），
+        // 切到国际版后仍看到国内版模型 —— 用户实测报告过。
+        modelApi.configs(undefined, realm),
         modelApi.groups(),
-        modelApi.busy().catch(() => null),
+        modelApi.busy(realm).catch(() => null),
       ]);
       setConfigs(cRes.items);
       setGroups(gRes.items);
@@ -77,7 +80,8 @@ export default function ModelsPage() {
     } catch (e) {
       setError(errText(e));
     }
-  }, []);
+    // realm 变化时必须重新加载（切换版本后看到对应版本的模型）
+  }, [realm]);
 
   useEffect(() => { load(); }, [load]);
 

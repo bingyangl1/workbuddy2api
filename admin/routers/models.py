@@ -62,20 +62,59 @@ def _is_model_allowed(db: Session, model_id: str) -> bool:
 @router.get("/configs")
 def list_configs(
     level: Optional[str] = None,
+    realm: str = "",
     _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
-    """列出所有模型配置。"""
+    """列出模型配置。**按 realm 过滤**（不传则返回全部）。
+
+    ## 为什么必须按 realm 过滤（真 bug）
+
+    这个端点原来无条件返回 `ModelConfig` 全表 —— 两版模型**混在一起**。
+    实测两版清单**交集只有 5 个**（cn 32 个 `hy3`/`hy4-preview` 那套，
+    global 18 个 `default-model`/`balanced-model` 那套）。
+
+    后果：面板切到「国际版」后，模型页仍然显示国内版 + 国际版的大杂烩，
+    看起来像「同步了但没生效」。用户实测报告过这个现象。
+
+    ## 过滤规则（与 `_models_for_realm` 保持一致）
+
+        realm=global → 只取 `global:` 前缀的（剥掉前缀展示）
+        realm=cn     → 取无前缀的 + `cn:` 前缀的
+        不传         → 全部（兼容旧调用）
+
+    **不做跨 realm 兜底** —— 该版没有模型时返回空列表，
+    让面板如实显示「还没同步」，而不是拿另一版的顶上。
+    """
     q = db.query(ModelConfig)
     if level:
         q = q.filter(ModelConfig.level == level)
     rows = q.order_by(ModelConfig.id.asc()).all()
+
+    r = (realm or "").strip().lower()
+    if r == "global":
+        rows = [m for m in rows if str(m.model_id).startswith("global:")]
+    elif r == "cn":
+        rows = [m for m in rows
+                if not str(m.model_id).startswith("global:")]
+
+    def _bare(mid: str) -> str:
+        """剥掉本地 realm 前缀（上游只认裸名，面板展示也该用裸名）。"""
+        s = str(mid)
+        for p in ("global:", "cn:"):
+            if s.startswith(p):
+                return s[len(p):]
+        return s
+
     return {
+        "realm": r or "all",
         "items": [
             {
                 "id": m.id,
                 "level": m.level,
-                "model_id": m.model_id,
+                "model_id": _bare(m.model_id),
+                "model_id_raw": m.model_id,
+                "realm": "global" if str(m.model_id).startswith("global:") else "cn",
                 "enabled": bool(m.enabled),
                 "note": m.note,
                 "credit_multiplier": m.credit_multiplier or 0,

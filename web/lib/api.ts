@@ -267,8 +267,16 @@ export const keyApi = {
 
 /* ── 模型（routers/models.py + groups.py）───────────────────────── */
 export const modelApi = {
-  configs: (level?: string) =>
-    get<{items: ModelConfig[]}>('/api/models/configs', level ? {level} : undefined),
+  /**
+   * 模型配置列表。
+   *
+   * ⚠️ **必须带 realm**：后端按 realm 过滤；不传会返回两版混合的清单。
+   * 两版模型交集只有 5 个 —— 混在一起会让人以为「同步了但没生效」。
+   */
+  configs: (level?: string, realm?: string) =>
+    get<{items: ModelConfig[]; realm?: string}>(
+      '/api/models/configs',
+      { ...(level ? {level} : {}), ...(realm ? {realm} : {}) }),
   toggle: (id: number, enabled: boolean) =>
     patch<{id: number; model_id: string; enabled: boolean}>(`/api/models/${id}`, {enabled}),
   // 契约：{model_ids: string[], enabled, level}（不是 ids:number[]）
