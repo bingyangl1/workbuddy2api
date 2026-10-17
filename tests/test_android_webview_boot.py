@@ -87,8 +87,18 @@ class WbDesktopExportsCase(unittest.TestCase):
         exported |= set(re.findall(r"^\s{4,6}(\w+)\s*,", block, re.M))
         self.assertTrue(exported, f"没能从导出块解析出键名：{block[:120]}")
 
-        called = set(re.findall(r"WBDesktop\.(\w+)", self.mobile))
-        self.assertTrue(called, "mobile.js 应至少调用一个 WBDesktop 方法")
+        called = set()
+        for ln in self.mobile.splitlines():
+            s = ln.strip()
+            if s.startswith("//") or s.startswith("*"):
+                continue          # 注释里会提到方法名（说明为什么这么写）
+            # 同时匹配 `WBDesktop.foo` 与可选链 `WBDesktop?.foo`
+            called |= set(re.findall(r"WBDesktop\??\.(\w+)", ln))
+        # 只用可选链时也应能抓到（`window.WBDesktop?.checkUpdatesAtStartup?.()`）
+        self.assertTrue(
+            called,
+            "没能从 mobile.js 里解析出任何 WBDesktop 调用 —— "
+            "如果确实不再依赖 WBDesktop，可以删除这条测试")
 
         missing = [name for name in sorted(called)
                    if name not in exported]

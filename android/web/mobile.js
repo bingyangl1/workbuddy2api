@@ -34,22 +34,46 @@ window.WBMobile = (() => {
       //
       // 现在：先无条件拆引导层（进入主界面），再把每个可选项单独 try。
       document.getElementById('localBoot')?.remove();
-      try { enterApp(); } catch (e) { console.error('enterApp failed', e); }
+      try { enterApp(); } catch (e) { reportBootError('enterApp', e); }
       try {
         const modeEl = document.getElementById('topbarMode');
         if (modeEl) modeEl.textContent = '手机本地运行';
-      } catch (e) { console.error('topbarMode failed', e); }
+      } catch (e) { reportBootError('topbarMode', e); }
       // 更新检查是**纯附加**功能：失败绝不该阻断进入主界面，
       // 也不该在方法不存在时抛 TypeError（早期版本没导出这个方法）。
       try { window.WBDesktop?.checkUpdatesAtStartup?.(); }
-      catch (e) { console.error('checkUpdatesAtStartup failed', e); }
+      catch (e) { reportBootError('checkUpdatesAtStartup', e); }
       try { window.WBMobileSettings?.start(); }
-      catch (e) { console.error('mobile settings failed', e); }
+      catch (e) { reportBootError('WBMobileSettings', e); }
     }
     try {
-      if (document.getElementById('app')?.classList.contains('hidden')) enterApp();
-    } catch (e) { console.error('enterApp retry failed', e); }
+      const app = document.getElementById('app');
+      if (app && app.classList.contains('hidden')) enterApp();
+    } catch (e) { reportBootError('enterApp retry', e); }
     window.dispatchEvent(new Event('wb-shell-resume'));
+  }
+
+  /**
+   * 把启动阶段的异常**显示到界面上**，而不是只写 console。
+   *
+   * 为什么需要：Android WebView 默认不转发 console 日志，`adb logcat`
+   * 里一行 JS 错误都看不到。真机排查时「界面卡住 + 零日志」等于瞎猜。
+   * 把错误贴到启动画面，至少能截图看到。
+   */
+  function reportBootError(where, err) {
+    const msg = (err && (err.message || err.name)) || String(err);
+    // eslint-disable-next-line no-console
+    console.error('[boot]', where, err);
+    try {
+      const status = document.getElementById('localBootStatus');
+      if (status) {
+        status.textContent = `启动异常（${where}）：${msg}`;
+      } else if (typeof toast === 'function') {
+        // `toast` 是 index.html 内联脚本里的**全局函数**（不是 WBDesktop 的方法）。
+        // 早先在 `WBDesktop.toast` 上找它 —— 那不存在，被导出测试抓到了。
+        toast(`启动异常：${msg}`, 'err');
+      }
+    } catch (_) { /* 报告失败不该再抛 */ }
   }
   document.documentElement.classList.add('mobile-mode', 'desktop-mode');
   // Android WebView denies navigator.clipboard writes. Its selection copy
@@ -71,7 +95,14 @@ window.WBMobile = (() => {
     finally { field.remove(); if (previous?.focus) previous.focus({preventScroll:true}); }
     toast(copied ? '已复制' : '复制失败，请长按文字复制', copied ? 'ok' : 'err');
   };
-  document.querySelector('.topbar-endpoint').onclick = () => copyText('#proxyUrl');
+  // ⚠️ **必须判空**：`.topbar-endpoint` 在部分界面形态下不存在。
+  // 这是 IIFE **顶层**代码 —— 一旦抛异常，整个 mobile.js 会中途退出，
+  // `window.WBMobile` 就永远不会被赋值，Java 端的
+  // `window.WBMobile && WBMobile.initialize(...)` 于是**静默跳过**，
+  // 界面永久卡在「正在打开本地工作台…」，且没有任何错误日志。
+  // 真机（OnePlus 9）实测就是被这个坑住的。
+  const endpointEl = document.querySelector('.topbar-endpoint');
+  if (endpointEl) endpointEl.onclick = () => copyText('#proxyUrl');
   const diagnosticButton = document.createElement('button');
   diagnosticButton.type = 'button';
   diagnosticButton.className = 'console-btn quiet mobile-diagnostics-button';
@@ -120,7 +151,16 @@ window.WBMobile = (() => {
     } catch (error) { toast('读取调用记录失败', 'err'); }
     finally { diagnosticButton.disabled = false; }
   };
-  document.querySelector('.api-share-card').append(diagnosticButton);
+  // ⚠️ **必须判空**：`.api-share-card` 在当前 index.html 里**根本不存在**
+  // （实测：`grep -c 'api-share-card' admin/static/index.html` = 0）。
+  //
+  // 原来这里直接 `.append(...)` → `null.append` 抛 TypeError →
+  // 整个 mobile.js IIFE 中途崩溃 → `window.WBMobile` 从没被赋值 →
+  // Java 端 `window.WBMobile && ...` 静默跳过 → 引导层永不消失。
+  //
+  // **这是真机上「界面卡在正在打开本地工作台」的真正根因。**
+  const shareCard = document.querySelector('.api-share-card');
+  if (shareCard) shareCard.append(diagnosticButton);
   const help = document.querySelector('.api-share-help');
   if (help) {
     const details = document.createElement('details');
@@ -134,9 +174,12 @@ window.WBMobile = (() => {
   const actions = document.querySelector('.topbar-actions');
   const header = document.querySelector('.desktop-topbar');
   function arrangeHeader() {
-    (compact.matches ? document.getElementById('appSide') : header).appendChild(actions);
+    // ⚠️ 两个元素都可能不存在（不同面板形态），且本函数**立刻执行**（L176）。
+    // 任一处为 null 都会让整个 IIFE 崩溃 → WBMobile 未导出 → 引导层卡死。
+    const target = compact.matches ? document.getElementById('appSide') : header;
+    if (target && actions) target.appendChild(actions);
   }
   compact.addEventListener('change', arrangeHeader);
-  arrangeHeader();
+  try { arrangeHeader(); } catch (e) { reportBootError('arrangeHeader', e); }
   return {initialize, saveText, saveResult};
 })();

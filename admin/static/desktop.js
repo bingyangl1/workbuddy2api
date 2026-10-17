@@ -134,6 +134,28 @@ window.WBDesktop = (() => {
   }
   async function initializeNative() {
     if (initialized) return;
+    // ⚠️ **必须先判断 pywebview 是否存在**。
+    //
+    // 这个函数被绑在页面上的「重新连接」按钮
+    //（`index.html`: `onclick="WBDesktop.retryLocal()"`）。
+    // 而在**安卓 WebView / 普通浏览器**里根本没有 `pywebview` 这个全局对象 ——
+    // 直接 `await pywebview.api.desktop_login()` 会抛
+    // `ReferenceError: pywebview is not defined`，
+    // 被 catch 后显示成「本地连接失败：pywebview is not defined」。
+    //
+    // 用户看到的是「连不上本地服务」，实际服务完全正常（curl 200）。
+    // 这个误导性提示在真机排查时浪费了大量时间。
+    if (!window.pywebview?.api) {
+      // 非桌面端：不标记 initialized（下次仍可重试），
+      // 并给出**准确的**说明而不是抛异常。
+      const status = document.getElementById('localBootStatus');
+      if (status) {
+        status.textContent = window.WBMobile
+          ? '手机端请稍候，正在准备本地服务…'
+          : '当前不是桌面客户端环境，请在桌面版中使用此功能';
+      }
+      return;
+    }
     initialized = true; native = true;
     try {
       const result = await pywebview.api.desktop_login();
