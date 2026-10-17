@@ -32,8 +32,12 @@ from admin.security import require_admin
 router = APIRouter(prefix="/api/growth", tags=["growth"],
                    dependencies=[Depends(require_admin)])
 
-#: 任务定义缓存 {"tasks": [...], "synced_at": iso}
-_task_cache: dict = {}
+#: 任务定义缓存 **按 realm 分键**：{"cn": {"tasks": [...], ...}, "global": {...}}
+#:
+#: 为什么必须分键：cn 与 global 是两个不同的上游域，任务 id / 奖励体系不同。
+#: 共用一份缓存会让「先看国内版、再切国际版」拿到国内版的清单 —— 界面显示
+#: 一堆国际版并不存在的任务。
+_task_caches: dict[str, dict] = {}
 
 #: 单账号任务列表的短缓存（秒）。
 #: 上游拉一次任务列表实测 1~3.3 秒，而前端「执行完 / 领奖完」都会立刻再拉一次；
@@ -122,11 +126,24 @@ def _pick_free_model(db: Session) -> str:
     return row.model_id if row else "hy3"
 
 
-def _pick_account(db: Session) -> Account | None:
-    """挑一个可用账号（仅用于拉取任务定义，不写任何东西）。"""
-    return (db.query(Account)
-            .filter(Account.status == "active")
-            .order_by(Account.id.asc()).first())
+def _pick_account(db: Session, realm: str = "") -> Account | None:
+    """挑一个可用账号（仅用于拉取任务定义，不写任何东西）。
+
+    `realm` 按版本过滤。原实现「随便挑一个」的假设是「任务定义对所有账号
+    一致」—— 那个假设**只在同一版本内成立**：
+
+        cn     与 global 是两个不同的上游域，成长/签到任务的定义、id、
+               奖励额度都可能不同（国际版的权益体系本来就不一样）。
+
+    用国内版账号拉来的任务定义去展示国际版，会给出
+    「界面上有这个任务、点去做却失败」的误导 —— 而且它的失败会被记到
+    那个无辜的国内版账号上（因为请求是用它的凭证发的）。
+    """
+    q = db.query(Account).filter(Account.status == "active")
+    r = (realm or "").strip().lower()
+    if r in ("cn", "global"):
+        q = q.filter(Account.realm == r)
+    return q.order_by(Account.id.asc()).first()
 
 
 def _classify_all(tasks: list[dict]) -> list[dict]:
@@ -149,39 +166,54 @@ class ClaimIn(BaseModel):
 
 
 @router.get("/tasks")
-def growth_tasks(refresh: bool = False, db: Session = Depends(get_db)):
+def growth_tasks(realm: str = "cn", refresh: bool = False,
+                 db: Session = Depends(get_db)):
     """获取全量任务列表（带分级信息），不绑定具体账号。
 
-    任务定义对所有账号一致，所以随便用一个可用登录态拉取即可。
+    `realm`（默认 cn，零回归）决定用**哪一版**账号去拉。
+
+    ⚠️ **不能假设「任务定义对所有账号一致」** —— 那个假设只在同一版本内成立：
+    cn 与 global 是两个不同的上游域，任务 id / 奖励体系都不一样。用国内版账号
+    拉来的清单展示给国际版，会给出「界面上有这个任务、点去做却失败」的误导，
+    而且失败会记到那个无辜的国内版账号上（请求是用它的凭证发的）。
+
+    缓存也按 realm 分键（否则先看国内版再切国际版会拿到国内版的缓存）。
     """
-    if _task_cache.get("tasks") and not refresh:
-        cached = dict(_task_cache)
+    r = (realm or "cn").strip().lower()
+    if r not in ("cn", "global"):
+        r = "cn"
+    cache = _task_caches.setdefault(r, {})
+    if cache.get("tasks") and not refresh:
+        cached = dict(cache)
         cached["cached"] = True
+        cached["realm"] = r
         return cached
 
-    acc = _pick_account(db)
+    acc = _pick_account(db, realm=r)
     if not acc:
-        raise HTTPException(400, "没有可用账号，无法拉取任务列表")
+        label = "国内版" if r == "cn" else "国际版"
+        raise HTTPException(400, f"没有可用的{label}账号，无法拉取任务列表")
 
     try:
         with backend.AccountSession(acc.auth_json) as s:
             raw = s.growth_tasks()
     except Exception as e:
-        # 拉取失败时退回旧缓存，避免面板整体不可用
-        if _task_cache.get("tasks"):
-            stale = dict(_task_cache)
-            stale.update({"cached": True, "stale": True, "error": str(e)})
+        # 拉取失败时退回**该版本**的旧缓存，避免面板整体不可用
+        if cache.get("tasks"):
+            stale = dict(cache)
+            stale.update({"cached": True, "stale": True, "error": str(e), "realm": r})
             return stale
         raise HTTPException(502, f"拉取任务列表失败: {e}")
 
-    _task_cache.clear()
-    _task_cache.update({
+    cache.clear()
+    cache.update({
         "tasks": _classify_all(raw),
         "synced_at": datetime.utcnow().isoformat(timespec="seconds"),
         "source_account_id": acc.id,
         "cached": False,
+        "realm": r,
     })
-    return dict(_task_cache)
+    return dict(cache)
 
 
 def _run_accept(acc: Account, codes: list[str]) -> dict:

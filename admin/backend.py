@@ -133,15 +133,21 @@ WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 #: 而本地机器明明装得好好的。档案把这些值变成**可保存、可同步**的数据，
 #: 本地探测一次推到线上，线上就能报出与真实客户端一致的版本。
 #:
-#: 下面两个模块级常量在导入时算一次（供静态引用）；**发请求请用函数版**，
+#: 下面这些常量在导入时算一次（供静态引用 / 诊断日志）；**发请求请用函数版**，
 #: 那样后台一改就立即生效，不必重启进程。
 #:
 #: 用 `effective_local()` 而不是 `effective()`：导入期**不查库**。
 #: 否则没有 MySQL 的环境（standalone converter）会在 import 阶段白等几秒。
-_PROFILE_AT_IMPORT = cprofile.effective_local()
-DESKTOP_VERSION = _PROFILE_AT_IMPORT["desktop_version"]
-CLI_VERSION = _PROFILE_AT_IMPORT["cli_version"]
-DESKTOP_UA = _PROFILE_AT_IMPORT["user_agent"]
+#:
+#: **按 realm 分开算**（真风险点）：单值常量意味着「进程启动时那一次探测到的
+#: 那一版」，之后无论请求属于哪个 realm 都拿到同一个值。虽然目前所有出站代码
+#: 都已改用函数版（`_desktop_ua()` / `desktop_version()` / `cli_version()`），
+#: 但保留单值常量会诱导后来者误用 —— 所以这里直接按 realm 存成字典，
+#: 误用时至少能立刻看出「你得指定版本」。
+_PROFILE_AT_IMPORT = {r: cprofile.effective_local(realm=r) for r in ("cn", "global")}
+DESKTOP_VERSION = {r: v["desktop_version"] for r, v in _PROFILE_AT_IMPORT.items()}
+CLI_VERSION = {r: v["cli_version"] for r, v in _PROFILE_AT_IMPORT.items()}
+DESKTOP_UA = {r: v["user_agent"] for r, v in _PROFILE_AT_IMPORT.items()}
 
 
 def _desktop_ua() -> str:
@@ -959,22 +965,37 @@ class AccountSession:
             "X-Domain": self._domain(),
         }
 
+    def _web_base(self) -> str:
+        """web 域基址（资料库等浏览器行为上报用）。
+
+        cn = `www.workbuddy.cn`；global 没有对应的 web 域（成长任务/资料库
+        在国际版本就不跑，见 scheduler 的 realm 门控），回落 `workbuddy.ai`。
+
+        为什么仍要按 realm 分：即便业务上国际版不跑这些任务，一旦有代码路径
+        误触发，写死国内域就会让国际版凭证打国内域 —— 那是最容易被判非法的形态。
+        """
+        if self._realm == "global":
+            return "https://www.workbuddy.ai"
+        return WEB_BASE
+
     def _web_headers(self, page_url: str) -> dict:
         """web 域头：浏览器形状。
 
-        X-Domain 必须显式覆盖成 web 域：auth 里的 domain 可能是
-        copilot.tencent.com，发往 www.workbuddy.cn 会造成跨域不一致。
+        X-Domain 必须显式覆盖成 **本 realm 的** web 域：auth 里的 domain 可能是
+        copilot.tencent.com，发往 web 域会造成跨域不一致；而两个 realm 的
+        web 域本身也不同。
         """
+        wb = self._web_base()
         return {
             "Authorization": f"Bearer {self._token_str()}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "x-client-platform": "web",
-            "Origin": WEB_BASE,
+            "Origin": wb,
             "Referer": page_url,
             "User-Agent": WEB_UA,
             "X-User-Id": self._uid(),
-            "X-Domain": WEB_BASE,
+            "X-Domain": wb,
         }
 
     def report_billing_event(self, events: list[dict]) -> dict:
@@ -1001,7 +1022,7 @@ class AccountSession:
             "machineId": stable_device_id(uid, "webmachine"),
             "userId": uid, "userNickname": self._nick(),
         }
-        return self._post_report(WEB_BASE + "/v2/report",
+        return self._post_report(self._web_base() + "/v2/report",
                                  self._web_headers(page_url), [ev])
 
     def _post_report(self, url: str, headers: dict, events: list[dict]) -> dict:
@@ -1144,8 +1165,14 @@ class AccountSession:
         return out
 
     def fetch_appearance_themes(self, keyword: str = "和平精英") -> list[dict]:
-        """真实外观主题资源（走 billing 域）。"""
-        url = BILL_BASE + "/v2/operation-platform/appearance/resources"
+        """真实外观主题资源（走 billing 域）。
+
+        **基址必须按 realm 取**：原实现用模块级常量 `BILL_BASE`
+        （= `www.codebuddy.cn`，国内版），于是国际版账号会打国内版 billing 域 ——
+        凭证是国际版的、域名是国内的，上游直接判非法（而且这种"少见路径"
+        排查成本极高，通常表现为「这个功能偶发失败」）。
+        """
+        url = self._billing_base().rstrip("/") + "/v2/operation-platform/appearance/resources"
         body = {"platform": "client", "kind": "theme", "version": "2.63.2",
                 "lang": "zh-CN"}
         try:

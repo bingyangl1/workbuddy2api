@@ -147,10 +147,12 @@ from admin import client_profile as cprofile  # noqa: E402  客户端参数档�
 
 # 模块导入期的常量：**不查库**（standalone converter 可能没配 MySQL）。
 # 运行期发请求走 client_user_agent()，那里才读后台保存值。
-_PROFILE_AT_IMPORT = cprofile.effective_local()
-DESKTOP_VERSION = _PROFILE_AT_IMPORT["desktop_version"]
-CLI_VERSION = _PROFILE_AT_IMPORT["cli_version"]
-USER_AGENT = _PROFILE_AT_IMPORT["user_agent"]
+# **按 realm 存字典**：单值常量会诱导「两版共用一份」的误用
+# （两版 UA 完全不同：WorkBuddy/5.8.3 vs workbuddy-ai/5.8.4）。
+_PROFILE_AT_IMPORT = {r: cprofile.effective_local(realm=r) for r in ("cn", "global")}
+DESKTOP_VERSION = {r: v["desktop_version"] for r, v in _PROFILE_AT_IMPORT.items()}
+CLI_VERSION = {r: v["cli_version"] for r, v in _PROFILE_AT_IMPORT.items()}
+USER_AGENT = {r: v["user_agent"] for r, v in _PROFILE_AT_IMPORT.items()}
 
 
 def client_user_agent() -> str:
@@ -578,12 +580,29 @@ class CredentialManager:
         CodeBuddy 个人体验版等一次性资源在账号层级 CapacityRemain 仍显示原始额度，
         但当期已用完后 CycleCapacityRemain 为 0；界面上的「累积剩余」也以周期剩余为准。
         """
-        data = self._request_backend("POST", "/v2/billing/meter/get-user-resource", {})
+        # /v2 前缀方向按 realm：CN 现状是 /v2 优先，Global 是无前缀优先
+        # （见 realm_mod.billing_paths）。原实现写死 "/v2/..." —— 国际版会打
+        # /v2/billing/meter/get-user-resource，而该域上正确形态是无前缀，
+        # 结果就是「余额查询在国际版上一直拿不到数据」。
+        try:
+            from admin import realm as realm_mod
+            _bp = realm_mod.billing_paths(self.realm, "user-resource")
+        except Exception:  # noqa: BLE001
+            _bp = ["/v2/billing/meter/get-user-resource"]
+        data: dict = {}
+        for _path in (_bp or ["/v2/billing/meter/get-user-resource"]):
+            data = self._request_backend("POST", _path, {})
+            if (data.get("data") or {}).get("Response"):
+                break
         resp = data.get("data", {}).get("Response", {}).get("Data", {}) or {}
         total = 0
         total_size = 0
         for a in resp.get("Accounts") or []:
-            if a.get("CapacityUnit") != "credits":
+            # 单位容忍单复数：gift 包（Bonus Pack）上游给的是 `credit`（单数），
+            # 严格等于 `credits` 会把整包漏掉（国际版 250 积分因此不可见）。
+            # 与 admin/billing.py 的 `_is_credit_unit` 同一判据。
+            from admin.billing import _is_credit_unit
+            if not _is_credit_unit(a.get("CapacityUnit")):
                 continue
             # 当前周期剩余才是真实可用额度
             total += a.get("CycleCapacityRemain") or 0
@@ -608,10 +627,13 @@ DEFAULT_MODELS = [
     "minimax-m3",
 ]
 
-# 后端资源缓存（TTL，秒）
+# 后端资源缓存（TTL，秒）。**按 realm 分槽**：
+#     {"cn": {"ts":..., "data":...}, "global": {...}}
+# 单槽会让「本机凭证切到另一版」后仍返回上一版的模型清单/余额（最长 60s）。
+# 两版的模型清单交集只有 5 个，拿错版本的那份会让模型名全部对不上。
 _RESOURCE_CACHE_TTL = 60.0
-_MODELS_CACHE = {"ts": 0.0, "data": None, "error": None}
-_BALANCE_CACHE = {"ts": 0.0, "data": None, "error": None}
+_MODELS_CACHE: dict = {}
+_BALANCE_CACHE: dict = {}
 
 # 后端请求体里出现过的额外字段（透传时若客户端给了就保留）
 #
@@ -694,39 +716,61 @@ def _cred() -> CredentialManager:
     return CONFIG["cred"]
 
 
+def _realm_key(cred) -> str:
+    """缓存键里的 realm 段。
+
+    这三个缓存原来都是**单槽**（`{"ts","data"}`），不分版本。单账号模式下
+    看起来"够用"，但有两个真实风险：
+
+      1. 本机凭证被切到另一版（`.info` 换成 workbuddy-ai 的）时，
+         缓存仍会返回上一版的模型清单/余额，最长 `_RESOURCE_CACHE_TTL` 秒；
+      2. 两版的模型清单**交集只有 5 个**（cn 32 / global 18），
+         拿到错版本的那份会让模型名全部对不上 —— 表现为"模型不存在"，
+         排查时完全想不到是缓存串了版本。
+
+    所以键里必须带 realm。
+    """
+    try:
+        return (getattr(cred, "realm", "") or "cn").strip().lower()
+    except Exception:      # noqa: BLE001
+        return "cn"
+
+
 def _cached_models(cred) -> list[dict]:
-    """带 TTL 缓存的真实模型列表；失败时抛异常由调用方回退。"""
-    global _MODELS_CACHE
+    """带 TTL 缓存的真实模型列表；失败时抛异常由调用方回退。**按 realm 分槽。**"""
     now = time.time()
-    if _MODELS_CACHE["data"] is not None and now - _MODELS_CACHE["ts"] < _RESOURCE_CACHE_TTL:
-        return _MODELS_CACHE["data"]
+    rk = _realm_key(cred)
+    slot = _MODELS_CACHE.setdefault(rk, {"ts": 0.0, "data": None, "error": None})
+    if slot["data"] is not None and now - slot["ts"] < _RESOURCE_CACHE_TTL:
+        return slot["data"]
     try:
         models = cred.fetch_models()
     except Exception as e:
-        _MODELS_CACHE["error"] = str(e)
+        slot["error"] = str(e)
         raise
-    _MODELS_CACHE = {"ts": now, "data": models, "error": None}
+    _MODELS_CACHE[rk] = {"ts": now, "data": models, "error": None}
     return models
 
 
 # 规范化后的模型目录缓存（含能力元数据）。与 _MODELS_CACHE 同 TTL，
 # 但存的是 upstream_compat.normalize_catalog 的结果，供 /v1/models 与
-# reasoning_effort 归一使用。
-_CATALOG_CACHE = {"ts": 0.0, "data": None}
+# reasoning_effort 归一使用。**按 realm 分槽**（理由同 _MODELS_CACHE）。
+_CATALOG_CACHE: dict = {}
 
 
 def _cached_catalog(cred) -> dict:
     """带 TTL 缓存的规范化模型目录：{chat: [...], image: [...], all_ids: [...]}。
 
-    失败时抛异常，由调用方回退（绝不缓存半成品）。
+    失败时抛异常，由调用方回退（绝不缓存半成品）。**按 realm 分槽。**
     """
-    global _CATALOG_CACHE
     now = time.time()
-    if _CATALOG_CACHE["data"] is not None and now - _CATALOG_CACHE["ts"] < _RESOURCE_CACHE_TTL:
-        return _CATALOG_CACHE["data"]
+    rk = _realm_key(cred)
+    slot = _CATALOG_CACHE.setdefault(rk, {"ts": 0.0, "data": None})
+    if slot["data"] is not None and now - slot["ts"] < _RESOURCE_CACHE_TTL:
+        return slot["data"]
     raw = cred.fetch_models_raw()
     catalog = upstream_compat.normalize_catalog(raw)
-    _CATALOG_CACHE = {"ts": now, "data": catalog}
+    _CATALOG_CACHE[rk] = {"ts": now, "data": catalog}
     return catalog
 
 
@@ -750,17 +794,18 @@ def _supported_efforts_for(cred, model: str) -> list[str] | None:
 
 
 def _cached_balance(cred) -> dict:
-    """带 TTL 缓存的真实积分额度；失败时抛异常由调用方回退。"""
-    global _BALANCE_CACHE
+    """带 TTL 缓存的真实积分额度；失败时抛异常由调用方回退。**按 realm 分槽。**"""
     now = time.time()
-    if _BALANCE_CACHE["data"] is not None and now - _BALANCE_CACHE["ts"] < _RESOURCE_CACHE_TTL:
-        return _BALANCE_CACHE["data"]
+    rk = _realm_key(cred)
+    slot = _BALANCE_CACHE.setdefault(rk, {"ts": 0.0, "data": None, "error": None})
+    if slot["data"] is not None and now - slot["ts"] < _RESOURCE_CACHE_TTL:
+        return slot["data"]
     try:
         balance = cred.fetch_balance()
     except Exception as e:
-        _BALANCE_CACHE["error"] = str(e)
+        slot["error"] = str(e)
         raise
-    _BALANCE_CACHE = {"ts": now, "data": balance, "error": None}
+    _BALANCE_CACHE[rk] = {"ts": now, "data": balance, "error": None}
     return balance
 
 

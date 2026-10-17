@@ -3592,6 +3592,14 @@ async def anthropic_messages(
     require_realm = model_realm or key_realm
     if model_realm:
         requested = model_bare
+        # **必须把裸名写回 chat_body**：`anthropic_request_to_chat()` 原样保留
+        # payload 里的 model，所以带前缀的 `global:xxx` / `cn:xxx` 会一路带到
+        # 出站请求 —— 而上游只认裸模型名（前缀是我们本地的 realm 隔离标记）。
+        #
+        # `/v1/responses` 一直有这一行，只有本端点漏了：症状是
+        # **用前缀调 Anthropic 协议必然「模型不存在」**，不带前缀时一切正常，
+        # 所以很容易被误判成客户端配置问题。
+        chat_body["model"] = model_bare
 
     allowed = _key_group_models(db, key)
     resolved = await _blocking_call(_pick_best_model, db, requested, allowed)
