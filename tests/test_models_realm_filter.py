@@ -62,10 +62,10 @@ class ModelsRealmFilterCase(unittest.TestCase):
         try:
             from admin.models import ModelConfig
             for mid in CN_MODELS:
-                db.add(ModelConfig(model_id=mid, level="system",
+                db.add(ModelConfig(realm="cn", model_id=mid, level="system",
                                    enabled=1, credit_multiplier=1))
             for mid in GL_MODELS:
-                db.add(ModelConfig(model_id=f"global:{mid}", level="system",
+                db.add(ModelConfig(realm="global", model_id=mid, level="system",
                                    enabled=1, credit_multiplier=1))
             db.commit()
         finally:

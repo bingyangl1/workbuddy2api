@@ -154,6 +154,9 @@ def push(
     for m in db.query(ModelConfig).all():
         models.append({
             "level": m.level,
+            # 导出时带上 realm —— 两版同名模型是两条独立配置，
+            # 少了这个字段导入端会互相覆盖（导出/导入必须可往返）
+            "realm": getattr(m, "realm", "") or "cn",
             "model_id": m.model_id,
             "enabled": m.enabled,
             "credit_multiplier": m.credit_multiplier or 0,
@@ -282,7 +285,23 @@ async def receive(request: Request, db: Session = Depends(get_db)):
         mid = m.get("model_id")
         if not mid:
             continue
-        existing = db.query(ModelConfig).filter(ModelConfig.model_id == mid).first()
+        # 两版同名模型是两条独立配置 —— 必须按 (realm, model_id) 定位，
+        # 否则导入会把国际版那条覆盖成国内版的倍率。
+        rv = (m.get("realm") or "").strip().lower()
+        if rv not in ("cn", "global"):
+            # 老格式载荷没有 realm：按 model_id 前缀推断，再退回 cn
+            s = str(mid)
+            if s.startswith("global:"):
+                rv, mid = "global", s[len("global:"):]
+            elif s.startswith("cn:"):
+                rv, mid = "cn", s[len("cn:"):]
+            else:
+                rv = "cn"
+        lv = m.get("level") or "system"
+        existing = (db.query(ModelConfig)
+                    .filter(ModelConfig.realm == rv,
+                            ModelConfig.model_id == mid,
+                            ModelConfig.level == lv).first())
         if existing:
             existing.enabled = int(m.get("enabled", existing.enabled))
             existing.credit_multiplier = float(m.get("credit_multiplier", existing.credit_multiplier or 0))
@@ -291,7 +310,8 @@ async def receive(request: Request, db: Session = Depends(get_db)):
             model_updated += 1
         else:
             db.add(ModelConfig(
-                level=m.get("level") or "system",
+                level=lv,
+                realm=rv,
                 model_id=mid,
                 enabled=int(m.get("enabled", 1)),
                 credit_multiplier=float(m.get("credit_multiplier", 0) or 0),

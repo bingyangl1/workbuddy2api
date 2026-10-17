@@ -148,43 +148,45 @@ class ProxyUsesRequestedModelCase(unittest.TestCase):
         cls.src = (root / "admin" / "routers" / "proxy.py").read_text(
             encoding="utf-8")
 
-    def test_lookup_uses_requested_model(self):
-        """**行为级**断言：`lookup = (requested_model or model...)`。
+    def test_lookup_uses_realm_and_bare_name(self):
+        """**行为级**断言：必须按 `(realm, 裸名)` 查配置。
+
+        改造后归属存进显式的 `ModelConfig.realm` 列，所以查找必须：
+
+          1. 从 `requested_model` 解析出 realm（`resolve_model_prefix`）
+          2. 按 `ModelConfig.realm == rv` 过滤
+          3. 用**裸名**匹配 `ModelConfig.model_id`
 
         不能只查 `"requested_model" in body` —— 反向验证抓到过假绿：
-        mutation 把逻辑改成 `lookup = (model or "")` 时，那一行的注释里
-        仍然有 `requested_model` 这个词，断言照样通过。
+        mutation 把逻辑改掉时，注释里仍有那个词，断言照样通过。
         """
         import re
         m = re.search(
             r"def _record_usage\(.*?(?=\ndef |\nclass )", self.src, re.S)
         self.assertIsNotNone(m, "找不到 _record_usage")
         body = m.group(0)
-        # 找到 lookup 赋值那一行，断言它真的优先用 requested_model
-        mm = re.search(r"lookup\s*=\s*\(([^)]*)\)", body)
-        self.assertIsNotNone(
-            mm, "**找不到 `lookup = (...)` 赋值** —— "
-                "说明倍率查找逻辑被改动了")
-        expr = mm.group(1)
-        self.assertIn(
-            "requested_model", expr,
-            f"**lookup 表达式必须优先用 requested_model**，实际是 `{expr}`。"
-            "只用裸名 model 会永远命中 cn 那行，"
-            "国际版免费模型被按国内版倍率扣费")
-        # 且 requested_model 在 or 链里排在 model 前面
-        self.assertLess(
-            expr.find("requested_model"), expr.find("model "),
-            f"requested_model 必须排在裸名 model 之前，实际 `{expr}`")
+        # 必须解析 realm
+        self.assertIn("resolve_model_prefix", body,
+                      "**估算倍率时必须先解析模型的 realm** —— "
+                      "只用裸名查会永远命中 cn 那行")
+        # 必须按 realm 列过滤
+        self.assertRegex(
+            body, r"ModelConfig\.realm\s*==",
+            "**必须按 ModelConfig.realm 过滤** —— 否则两版同名模型查询会串")
+        # 必须从 requested_model 取原始名（带前缀）
+        self.assertRegex(
+            body, r"requested_model",
+            "应从 requested_model（客户端原始名）解析 realm")
 
     def test_comment_explains_realm(self):
-        """注释里应说明为什么不能用裸名（防后人「简化」掉）。"""
+        """注释里应说明两版同名模型倍率不同（防后人「简化」掉）。"""
         import re
         m = re.search(
             r"def _record_usage\(.*?(?=\ndef |\nclass )", self.src, re.S)
         body = m.group(0)
         self.assertRegex(
-            body, r"global:|realm|前缀",
-            "注释应解释两版倍率不同、必须用带前缀的名字查")
+            body, r"realm|global",
+            "注释应解释两版倍率不同、必须按 realm 查")
 
 
 if __name__ == "__main__":

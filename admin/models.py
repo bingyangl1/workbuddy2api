@@ -267,13 +267,50 @@ class UsageLog(Base):
 
 
 class ModelConfig(Base):
-    """模型白名单配置（系统级 / 用户级）。"""
+    """模型白名单配置（系统级 / 用户级）。
+
+    ## realm 列（2026-10 改造）
+
+    两版**可能同名但能力/计费不同**（实测 `hy4-preview`：
+    cn=0.29、global=0.00），所以必须能并存两条。
+
+    改造前靠 `model_id` 的字符串前缀（`global:`）区分 ——
+    能工作，但语义脆弱：
+
+      * 没有唯一约束，手写 SQL 能插两条重复的 `global:xxx`
+      * 查询「两版共有模型」要靠前缀解析，每个读写点都得记得剥/加
+      * 计费曾因此在裸名上查错版本（已修，见 proxy.py::_record_usage 注释）
+
+    改造后：
+
+      realm    显式列（`cn` / `global`），带默认值 `cn`
+      model_id **裸名**（`hy4-preview`），不带任何前缀
+
+    唯一约束 `(level, realm, model_id)` —— 同一层级、同一版本下
+    不可能有重复模型。
+
+    ## 兼容
+
+    * 老数据（`global:xxx`）由迁移脚本 `_migrate_model_realm()` 转换
+    * 对外 API 仍接受/返回 `cn:` / `global:` 前缀（客户端协议不变），
+      见 `admin/realm.py::resolve_model_prefix` —— 那层是**协议**，
+      不是存储形态
+    """
 
     __tablename__ = "model_configs"
+    __table_args__ = (
+        # 同一层级 + 同一版本 + 同一模型名 = 唯一
+        UniqueConstraint("level", "realm", "model_id",
+                         name="uq_model_configs_level_realm_model"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     level = Column(String(16), default="system")  # system | user
-    model_id = Column(String(120), nullable=False)  # 模型 ID，如 "deepseek-v4-flash"
+    # 版本归属：cn（国内版）| global（国际版）。
+    # 为什么给默认值 "cn"：老库升级时既有行全是国内版（改造前国内版
+    # 不带前缀），有默认值就能让 ALTER TABLE 直接补上而不必回填。
+    realm = Column(String(16), default="cn", nullable=False)
+    model_id = Column(String(120), nullable=False)  # **裸名**，如 "deepseek-v4.1-flash"
     enabled = Column(Integer, default=1)  # 0/1
     note = Column(String(255), default="")
     credit_multiplier = Column(Float, default=0)  # 积分消耗倍率；0=免费模型

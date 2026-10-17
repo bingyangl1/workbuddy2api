@@ -13,7 +13,7 @@
 |---|---|
 | 测试总数 | **910 通过**（+7 环境条件跳过） |
 | 测试文件 | 53 个 |
-| 反向验证 mutation | **44 条**（全部有效） |
+| 反向验证 mutation | **46 条**（全部有效） |
 | CI 工作流 | 3 个（tests / desktop-release / android-release） |
 | 代码规模 | `admin/` 约 25000 行 + `converter.py` 1682 行 |
 

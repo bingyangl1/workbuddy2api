@@ -665,10 +665,18 @@ def model_limits(_: bool = Depends(require_admin_read), db: Session = Depends(ge
                           **usage.get((account.id, entry["model"]), {"requests_today": 0, "tokens_today": 0})})
     from admin.pool import POOL
     summary = []
-    configs = {c.model_id: c for c in db.query(ModelConfig).filter(ModelConfig.enabled == 1, ModelConfig.level == "system").all()}
-    for model in sorted(set(configs) | {e["model"] for e in items}):
-        config = configs.get(model)
-        free = config is not None and config.credit_multiplier == 0
+    # 键用 (realm, model_id)：两版同名模型是两条配置，只用 model_id 会互相覆盖
+    configs = {(getattr(c, "realm", "") or "cn", c.model_id): c
+               for c in db.query(ModelConfig).filter(
+                   ModelConfig.enabled == 1,
+                   ModelConfig.level == "system").all()}
+    for model in sorted({mid for (_rv, mid) in configs} | {e["model"] for e in items}):
+        cfg_pairs = [(rv, c) for (rv, mid), c in configs.items() if mid == model]
+        config = next((c for rv, c in cfg_pairs if rv == "cn"), None) \
+            or (cfg_pairs[0][1] if cfg_pairs else None)
+        # 任一版免费即按免费算（宽松口径，避免按错版本误杀可用账号）
+        free = bool(cfg_pairs) and any(
+            (c.credit_multiplier or 0) == 0 for _rv, c in cfg_pairs)
         blocked = {e["account_id"] for e in items if e["model"] == model}
         available = [a for a in rows if a.status == "active" and a.id not in blocked
                      and _gateway_fields(a, now)["gateway_state"] == "ready"

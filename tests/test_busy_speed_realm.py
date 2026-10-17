@@ -71,18 +71,32 @@ class ModelsForRealmCase(unittest.TestCase):
     一并发给国际版账号 → 上游根本不认识 → 请求失败 → 返回 `stale=True`
     （前端显示一屏 unknown，看起来像「上游不可用」）。
 
-    ## 为什么必须剥前缀
+    ## 为什么必须返回裸名
 
-    `global:` / `cn:` 是**本地**的 realm 隔离标记；上游只认**裸模型名**。
-    带着前缀发过去，上游同样不认识。
+    `global:` / `cn:` 是**协议层**的写法（客户端请求/响应里的版本标记）；
+    存储层用的是 `ModelConfig.realm` 列，`model_id` 本来就是裸名。
+    上游只认裸模型名，带前缀发过去必然认不出。
+
+    ## 2026-10 改造
+
+    原来归属靠 `model_id` 的字符串前缀（`global:xxx`）表示；
+    现在改成显式的 `realm` 列 + 裸 `model_id`。本测试的数据构造
+    与断言都按新形态写（老库由 `_migrate_model_realm()` 自动转换）。
     """
 
     def setUp(self):
         self.db = _db()
         from admin.models import ModelConfig
-        for mid in ("hy3", "auto", "cn:hy4-preview",
-                    "global:default-model", "global:balanced-model"):
-            self.db.add(ModelConfig(level="system", model_id=mid, enabled=1))
+        # (realm, model_id) —— 显式列，不再是前缀
+        for realm, mid in (
+            ("cn", "hy3"),
+            ("cn", "auto"),
+            ("cn", "hy4-preview"),
+            ("global", "default-model"),
+            ("global", "balanced-model"),
+        ):
+            self.db.add(ModelConfig(level="system", realm=realm,
+                                    model_id=mid, enabled=1))
         self.db.commit()
         from admin.routers.models import _models_for_realm
         self.fn = _models_for_realm
@@ -98,31 +112,35 @@ class ModelsForRealmCase(unittest.TestCase):
         self.assertIn("auto", got)
 
     def test_global_excludes_cn_models(self):
-        """**核心**：global 只能拿到带 global: 前缀的那些（并剥掉前缀）。"""
+        """**核心**：global 只能拿到 realm='global' 的那些。"""
         got = self.fn(self.db, "global")
         self.assertEqual(sorted(got), ["balanced-model", "default-model"],
-                         "global 应只含国际版模型且已剥掉前缀")
+                         "global 应只含国际版模型")
         self.assertNotIn("hy3", got, "国内版模型不能混进国际版清单")
 
-    def test_prefix_stripped(self):
-        """上游只认裸名 —— 前缀是本地标记，必须剥掉。"""
+    def test_no_colon_in_names(self):
+        """上游只认裸名 —— 返回的清单里不该出现 `cn:` / `global:` 前缀。"""
         for r in ("cn", "global"):
             for mid in self.fn(self.db, r):
                 self.assertNotIn(":", mid,
-                                 f"{r} 的模型名仍带本地前缀：{mid!r}")
+                                 f"{r} 的模型名仍带协议前缀：{mid!r}")
 
-    def test_empty_realm_returns_all_unchanged(self):
-        """realm='' → 全表且**不剥前缀**（既有行为，零回归）。"""
+    def test_empty_realm_returns_all(self):
+        """realm='' → 返回全部（两版的并集，已去重）。
+
+        改造后 `model_id` 本来就是裸名，所以「保持原样」= 裸名集合。
+        """
         got = self.fn(self.db, "")
-        self.assertIn("global:default-model", got,
-                      "不传 realm 时应保持原样（旧的调用方依赖这个形态）")
-        self.assertEqual(len(got), 5)
+        self.assertEqual(
+            sorted(got),
+            ["auto", "balanced-model", "default-model", "hy3", "hy4-preview"],
+            "不传 realm 应返回两版的并集（裸名）")
 
     def test_realm_with_no_models_returns_empty(self):
         """该版没有模型 → 空列表（而不是拿另一版的顶上）。"""
         from admin.models import ModelConfig
         self.db.query(ModelConfig).filter(
-            ModelConfig.model_id.like("global:%")).delete(synchronize_session=False)
+            ModelConfig.realm == "global").delete(synchronize_session=False)
         self.db.commit()
         self.assertEqual(self.fn(self.db, "global"), [])
 

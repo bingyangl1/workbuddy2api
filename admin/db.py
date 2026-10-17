@@ -275,6 +275,20 @@ def init_db() -> bool:
         _ensure_column("accounts", "group_id", "INT", "DEFAULT 0")
         _ensure_column("api_keys", "account_group_id", "INT", "DEFAULT 0")
 
+        # 迁移（2026-10）：model_configs 增加显式 realm 列
+        #
+        # 改造前靠 model_id 的 `global:` 前缀区分两版。前缀能工作，但：
+        #   * 没有唯一约束（手写 SQL 能插重复）
+        #   * 每个读写点都得记得剥/加前缀
+        #   * 计费曾因在裸名上查配置而按错版本扣费
+        #
+        # 给默认值 "cn" 是为了让 ALTER TABLE 直接补上（改造前国内版不带前缀，
+        # 既有行全是国内版，默认值即正确归属），不必先回填再加约束。
+        _ensure_column("model_configs", "realm", "VARCHAR(16)", "DEFAULT 'cn'")
+        _migrate_model_realm()
+        _ensure_unique("model_configs", "uq_model_configs_level_realm_model",
+                       ("level", "realm", "model_id"))
+
         # 迁移（P2 铺轨）：新表 audit_logs / api_tokens 由 create_all 建，
         # 但老库升级路径上索引同样需要显式兜底（见 _ensure_index 的说明：
         # create_all 对已存在的表不做任何事）。
@@ -382,6 +396,128 @@ def _ensure_index(table: str, index: str, columns: tuple[str, ...]) -> bool:
     except Exception as e:
         # 权限不足 / 方言不支持 / 并发建索引冲突：都不该让服务启动失败
         logger.warning("创建索引 %s 失败（不影响启动）：%s", index, e)
+        return False
+
+
+def _migrate_model_realm() -> None:
+    """把 `model_id` 里的 `global:` 前缀搬到 `realm` 列（幂等）。
+
+    ## 为什么迁移
+
+    改造前两版靠 `model_id` 的字符串前缀区分（国际版 `global:xxx`，
+    国内版裸名）。改造后改成显式 `realm` 列 + 裸 `model_id`。
+
+    这条迁移做的事：
+
+        model_id = 'global:hy4-preview'  →  realm='global', model_id='hy4-preview'
+        model_id = 'hy4-preview'         →  realm='cn',     model_id='hy4-preview'
+        model_id = 'cn:glm-5.3'          →  realm='cn',     model_id='glm-5.3'
+
+    ## 为什么是幂等的
+
+    只处理 `model_id` **仍带前缀**的行。跑过一次之后表里就没有带前缀的
+    `model_id` 了，第二次进来条件不成立，什么都不做。
+
+    ## 冲突处理
+
+    理论上可能出现「strip 之后与已有裸名行重复」：
+    比如同时存在 `global:hy3` 和 `hy3`？—— 不会，因为前缀不同表示
+    两个不同 realm，strip 后 realm 列也不同，唯一约束 `(level,realm,model_id)`
+    能满足。
+
+    但可能出现**同一 realm 内**重复（老库手工插过），
+    这时保留 id 最小的那条（先入库的），其余删除并记日志 ——
+    比让 ALTER 加唯一约束时直接失败要好。
+    """
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text(
+                "SELECT id, level, realm, model_id FROM model_configs "
+                "WHERE model_id LIKE 'global:%' OR model_id LIKE 'cn:%'"
+            )).fetchall()
+            if not rows:
+                return
+            moved = 0
+            for rid, level, cur_realm, mid in rows:
+                s = str(mid)
+                if s.startswith("global:"):
+                    new_realm, bare = "global", s[len("global:"):]
+                else:
+                    new_realm, bare = "cn", s[len("cn:"):]
+                # 目标行是否已存在（同 level + realm + 裸名）
+                dup = conn.execute(text(
+                    "SELECT id FROM model_configs "
+                    "WHERE level=:lv AND realm=:rl AND model_id=:mid AND id<>:id"
+                ), {"lv": level, "rl": new_realm, "mid": bare,
+                    "id": rid}).fetchone()
+                if dup:
+                    # 已有裸名行 → 删除这条带前缀的（保留先入库的裸名行）
+                    conn.execute(text("DELETE FROM model_configs WHERE id=:id"),
+                                 {"id": rid})
+                    logger.info(
+                        "model_configs 迁移：删除重复行 id=%s (%s:%s)",
+                        rid, new_realm, bare)
+                else:
+                    conn.execute(text(
+                        "UPDATE model_configs SET realm=:rl, model_id=:bare "
+                        "WHERE id=:id"), {"rl": new_realm, "bare": bare,
+                                          "id": rid})
+                    moved += 1
+            if moved:
+                logger.info(
+                    "model_configs 迁移：%d 行的 realm 前缀已搬到 realm 列",
+                    moved)
+    except Exception as e:      # noqa: BLE001
+        # 迁移失败不能阻断启动 —— 但要让运维看到
+        logger.warning("model_configs realm 迁移失败（不影响启动）：%s", e)
+
+
+def _ensure_unique(table: str, index: str, columns: tuple[str, ...]) -> bool:
+    """确保唯一约束存在（幂等）。返回 True 表示本次新建。
+
+    与 `_ensure_index` 同样的理由：`create_all()` 对已存在的表不做任何事，
+    所以老库上新加的唯一约束永远不会生效。
+
+    ## 建不上时怎么办
+
+    唯一约束是**加固**，不是功能依赖 —— 建不上（老数据有重复 / 权限不足）
+    只记 warning，不阻断启动。数据层面的正确性仍由代码保证，
+    约束只是防止「手写 SQL 插重复」这类意外。
+
+    MySQL 用 `CREATE UNIQUE INDEX`（等价于 UNIQUE 约束，且能判存在性）；
+    SQLite 用 `CREATE UNIQUE INDEX IF NOT EXISTS`。
+    """
+    if not columns:
+        return False
+    try:
+        if engine.dialect.name == "sqlite":
+            with engine.begin() as conn:
+                cols = ", ".join(f'"{_safe_ident(c)}"' for c in columns)
+                conn.execute(text(
+                    f'CREATE UNIQUE INDEX IF NOT EXISTS "{_safe_ident(index)}" '
+                    f'ON "{_safe_ident(table)}" ({cols})'))
+            return True
+        with engine.connect() as conn:
+            exists = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:tbl "
+                    "AND INDEX_NAME=:idx"
+                ),
+                {"tbl": table, "idx": index},
+            ).scalar() or 0
+            if exists:
+                return False
+            cols = ", ".join(f"`{_safe_ident(c)}`" for c in columns)
+            conn.execute(
+                text(f"CREATE UNIQUE INDEX `{_safe_ident(index)}` "
+                     f"ON `{_safe_ident(table)}` ({cols})")
+            )
+            conn.commit()
+            logger.info("已创建唯一约束 %s(%s)", index, ",".join(columns))
+            return True
+    except Exception as e:      # noqa: BLE001
+        logger.warning("创建唯一约束 %s 失败（不影响启动）：%s", index, e)
         return False
 
 

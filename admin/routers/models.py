@@ -91,13 +91,6 @@ def list_configs(
         q = q.filter(ModelConfig.level == level)
     rows = q.order_by(ModelConfig.id.asc()).all()
 
-    r = (realm or "").strip().lower()
-    if r == "global":
-        rows = [m for m in rows if str(m.model_id).startswith("global:")]
-    elif r == "cn":
-        rows = [m for m in rows
-                if not str(m.model_id).startswith("global:")]
-
     def _bare(mid: str) -> str:
         """剥掉本地 realm 前缀（上游只认裸名，面板展示也该用裸名）。"""
         s = str(mid)
@@ -106,15 +99,31 @@ def list_configs(
                 return s[len(p):]
         return s
 
+    def _row_realm(m) -> str:
+        """该行的归属版本。
+
+        优先用显式 `realm` 列（改造后的正确来源）；
+        为兼容迁移未完成的库，再按 `model_id` 前缀兜底。
+        """
+        rv = str(getattr(m, "realm", "") or "").strip().lower()
+        if rv in ("cn", "global"):
+            return rv
+        return "global" if str(m.model_id).startswith("global:") else "cn"
+
+    r = (realm or "").strip().lower()
+    if r in ("cn", "global"):
+        rows = [m for m in rows if _row_realm(m) == r]
+
     return {
         "realm": r or "all",
         "items": [
             {
                 "id": m.id,
                 "level": m.level,
+                # 面板展示用裸名；`model_id_raw` 保留库里的原值供对账
                 "model_id": _bare(m.model_id),
                 "model_id_raw": m.model_id,
-                "realm": "global" if str(m.model_id).startswith("global:") else "cn",
+                "realm": _row_realm(m),
                 "enabled": bool(m.enabled),
                 "note": m.note,
                 "credit_multiplier": m.credit_multiplier or 0,
@@ -153,30 +162,43 @@ def model_busy(realm: str = "",
 
 
 def _models_for_realm(db: Session, realm: str) -> list[str]:
-    """该 realm 下的模型 id 列表。
+    """该 realm 下的模型 id 列表（**裸名**）。
 
-    国内版历史上用**无前缀**形态存储（`global:` 前缀只给国际版），
-    所以过滤规则是：
+    ## 改造后（2026-10）
 
-        realm=global → 只取 `global:` 开头的，并去掉前缀（上游认裸名）
-        realm=cn     → 取无前缀的 + `cn:` 开头的（兼容显式加前缀的写法）
+    归属改由显式的 `ModelConfig.realm` 列决定，`model_id` 里存的是裸名。
+    不再靠 `global:` 前缀判断 —— 那个前缀现在是**协议层**的东西
+    （客户端请求/响应里的 `cn:` / `global:`），不是存储形态。
+
+        realm=global → 只取 realm='global' 的行
+        realm=cn     → 只取 realm='cn' 的行
         realm=''     → 全表（既有行为）
 
-    去掉前缀很重要：`ModelConfig.model_id` 是**本地**的隔离标记，
-    上游只认裸模型名。
+    ## 兼容老数据
+
+    `ModelConfig.realm` 有默认值 `cn`，且启动迁移
+    （`admin/db.py::_migrate_model_realm`）会把老数据的 `global:` 前缀
+    搬到 realm 列。所以这里不需要再判断前缀。
+
+    但为稳妥起见，遇到**仍带前缀的 model_id**（迁移没跑成功时）
+    就地剥掉 —— 上游只认裸名，带前缀发出去必然 404。
     """
-    from sqlalchemy import or_
-    q = db.query(ModelConfig.model_id).distinct()
+    q = db.query(ModelConfig.model_id, ModelConfig.realm).distinct()
     r = (realm or "").strip().lower()
-    if r == "global":
-        rows = q.filter(ModelConfig.model_id.like("global:%")).all()
-        return [str(x[0])[len("global:"):] for x in rows]
-    if r == "cn":
-        rows = q.filter(or_(~ModelConfig.model_id.like("%:%"),
-                            ModelConfig.model_id.like("cn:%"))).all()
-        return [str(x[0])[len("cn:"):] if str(x[0]).startswith("cn:") else str(x[0])
-                for x in rows]
-    return [str(x[0]) for x in q.all()]
+
+    def _bare(mid: str) -> str:
+        s = str(mid)
+        for p in ("global:", "cn:"):
+            if s.startswith(p):
+                return s[len(p):]
+        return s
+
+    if r in ("cn", "global"):
+        rows = q.filter(ModelConfig.realm == r).all()
+        # 兜底：若某行 realm 列没填对但 model_id 带该 realm 前缀，也算进来
+        rows += q.filter(ModelConfig.model_id.like(f"{r}:%")).all()
+        return sorted({_bare(x[0]) for x in rows})
+    return sorted({_bare(x[0]) for x in q.all()})
 
 
 def _pick_sync_account(db: Session, realm: str) -> Account | None:
@@ -224,18 +246,27 @@ def _do_sync_models(db: Session, realm: str = "cn") -> dict:
 
     import re
 
-    # realm 前缀：两版模型可能同名但能力/倍率不同（realm 隔离的核心）。
-    # 国内版沿用历史的「无前缀」形态（零回归），国际版加 `global:` 前缀。
-    prefix = "" if realm in ("", "cn") else f"{realm}:"
+    # 归属版本写进 `realm` 列，`model_id` 存**裸名**（改造后的形态）。
+    #
+    # 改造前是给模型名加 `global:` 前缀来区分 —— 那样能工作，但
+    # 每个读写点都得记得剥/加，且没有唯一约束。现在改成显式列。
+    rv = realm if realm in ("cn", "global") else "cn"
 
     added = 0
     updated = 0
-    seen = {m.model_id for m in db.query(ModelConfig.model_id).all()}
+    # 已存在判断要带上 realm（同名模型两版各一条）
+    seen = {(x.realm, x.model_id) for x in
+            db.query(ModelConfig.realm, ModelConfig.model_id).all()}
     for m in models_raw:
         mid = m.get("id")
         if not mid or mid.lower() == "auto":
             continue  # 跳过上游聚合模型 "auto"，我们系统有自己的免费优先 auto 逻辑
-        mid = f"{prefix}{mid}" if prefix and not mid.startswith(prefix) else mid
+        # 上游可能返回带前缀的名字（老协议），统一剥成裸名再存
+        mid = str(mid)
+        for p in ("global:", "cn:"):
+            if mid.startswith(p):
+                mid = mid[len(p):]
+                break
         # 解析积分倍率
         raw_credits = m.get("credits") or ""
         multiplier = 0.0
@@ -246,9 +277,12 @@ def _do_sync_models(db: Session, realm: str = "cn") -> dict:
                     multiplier = float(cre_match.group(1))
                 except (ValueError, TypeError):
                     pass
-        if mid in seen:
+        key = (rv, mid)
+        if key in seen:
             # 已存在：覆盖倍率 / 原始 credits / 备注（保留用户启停状态）
-            mc = db.query(ModelConfig).filter(ModelConfig.model_id == mid).first()
+            mc = (db.query(ModelConfig)
+                  .filter(ModelConfig.realm == rv,
+                          ModelConfig.model_id == mid).first())
             if mc:
                 mc.credit_multiplier = multiplier
                 mc.credits_raw = str(raw_credits)
@@ -256,9 +290,10 @@ def _do_sync_models(db: Session, realm: str = "cn") -> dict:
                     mc.note = m.get("name") or ""
                 updated += 1
             continue
-        seen.add(mid)
+        seen.add(key)
         mc = ModelConfig(
             level="system",
+            realm=rv,
             model_id=mid,
             enabled=1,
             note=m.get("name") or "",

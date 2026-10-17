@@ -117,15 +117,22 @@ def _pick_free_model(db: Session) -> str:
     任务记账不依赖模型输出质量，用免费模型可以把成本压到 0。
     """
     from admin.models import ModelConfig
+    # 按 realm 查：两版同名模型倍率可能不同（实测 hy4-preview cn 0.29 / global 0.00），
+    # 不区分版本会按错的那版判定「是否免费」。
+    rv = (realm or "").strip().lower()
     for mid in _PREFERRED_MODELS:
-        row = (db.query(ModelConfig)
-               .filter(ModelConfig.model_id == mid, ModelConfig.enabled == 1)
-               .first())
+        q = db.query(ModelConfig).filter(ModelConfig.model_id == mid,
+                                         ModelConfig.enabled == 1)
+        if rv in ("cn", "global"):
+            q = q.filter(ModelConfig.realm == rv)
+        row = q.first()
         if row and (row.credit_multiplier or 0) == 0:
             return mid
-    row = (db.query(ModelConfig)
-           .filter(ModelConfig.enabled == 1, ModelConfig.credit_multiplier == 0)
-           .order_by(ModelConfig.model_id.asc()).first())
+    q2 = db.query(ModelConfig).filter(ModelConfig.enabled == 1,
+                                      ModelConfig.credit_multiplier == 0)
+    if rv in ("cn", "global"):
+        q2 = q2.filter(ModelConfig.realm == rv)
+    row = q2.order_by(ModelConfig.model_id.asc()).first()
     return row.model_id if row else "hy3"
 
 

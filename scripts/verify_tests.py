@@ -337,8 +337,10 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         name="docs-mutation-count-stale",
         file="docs-dev/ENGINEERING-BASELINE.md",
-        old="| 反向验证 mutation | **34 条**（全部有效） |",
-        new="| 反向验证 mutation | **99 条**（全部有效） |",
+        # 数字会随 mutation 增删变化，所以**动态读当前值**再改成离谱的 999。
+        # 硬编码某一个具体数字的话，每加一条 mutation 这条锚点就失效。
+        old="| 反向验证 mutation | **{n} 条**（全部有效） |",
+        new="| 反向验证 mutation | **999 条**（全部有效） |",
         tests=["tests/test_docs_links.py::DocumentedNumbersCase"],
         why="文档里的数字过期 → 读者按 99 条去找却只有 34 条，"
             "从此不再相信文档里的任何数字",
@@ -357,8 +359,9 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         name="plan-test-count-stale",
         file="../PLAN-fork.md",
-        old="| 测试文件 | **59 个** |",
-        new="| 测试文件 | **99 个** |",
+        # 同上：动态读当前文件数，避免每加一个测试文件就失效
+        old="| 测试文件 | **{n} 个** |",
+        new="| 测试文件 | **999 个** |",
         tests=["tests/test_docs_links.py::PlanFileNumbersCase"],
         why="计划文件里的数字过期 → 它是判断进度最常用的依据，"
             "数字不可信就等于进度不可信",
@@ -458,14 +461,40 @@ MUTATIONS: list[Mutation] = [
     Mutation(
         name="billing-bare-model-lookup",
         file="admin/routers/proxy.py",
-        old=("                lookup = (requested_model or model or \"\").strip()"),
-        new=("                lookup = (model or \"\").strip()  "
-             "# (mutation) 丢掉 requested_model，退回裸名"),
+        old=("                req_realm, req_bare = "
+             "realm_mod.resolve_model_prefix(req)"),
+        new=("                req_realm, req_bare = None, req  "
+             "# (mutation) 不解析 realm，一律按裸名查"),
         tests=["tests/test_realm_billing_isolation.py"
                "::ProxyUsesRequestedModelCase"],
         why="用裸名查倍率 → 永远命中 cn 那行 → 国际版免费模型被按国内版"
             " 0.29 扣费（用户多付积分）",
         tags=["realm", "billing"],
+    ),
+    # ── model_configs 的 realm 列与迁移 ────────────────────────────
+    Mutation(
+        name="model-realm-no-migrate",
+        file="admin/db.py",
+        old="        _migrate_model_realm()",
+        new="        pass  # (mutation) 不跑 realm 迁移",
+        tests=["tests/test_model_realm_migration.py"
+               "::MigrationHelpersCase::test_called_in_init_db"],
+        why="不把老的 global: 前缀搬到 realm 列 → 老库升级后 "
+            "国际版模型仍靠前缀、新查询按 realm 列查不到 → 国际版看不到模型",
+        tags=["db", "realm"],
+    ),
+    Mutation(
+        name="model-realm-no-unique",
+        file="admin/db.py",
+        old=("        _ensure_unique(\"model_configs\", "
+             "\"uq_model_configs_level_realm_model\",\n"
+             "                       (\"level\", \"realm\", \"model_id\"))"),
+        new="        pass  # (mutation) 不建唯一约束",
+        tests=["tests/test_model_realm_migration.py"
+               "::MigrationHelpersCase::test_called_in_init_db"],
+        why="不建唯一约束 → 手写 SQL / 并发同步能插重复行 → "
+            "同一个模型被算两次、倍率随机命中一条",
+        tags=["db", "realm"],
     ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
@@ -580,6 +609,33 @@ def run_pytest(selectors: list[str], env: dict) -> tuple[int, str]:
     return proc.returncode, tail
 
 
+def _resolve_anchor(m: Mutation, text: str) -> tuple[str, str] | None:
+    """把锚点里的 `{n}` 占位符解析成文档中的**当前数字**。
+
+    ## 为什么需要这个
+
+    有些 mutation 注入的是「文档里写过期的数字」，锚点自然包含那个数字。
+    但数字会随「加了几个测试文件 / 加了几条 mutation」变化 ——
+    硬编码某个具体数字的话，每变一次锚点就失效（实测踩过两次）。
+
+    用 `{n}` 占位后：从目标文件里按**同一行的其余文字**反查出当前数字，
+    再用它拼出真实锚点。
+
+    返回 `(old, new)`；解析不出来返回 None（调用方按锚点失效处理）。
+    """
+    if "{n}" not in m.old and "{n}" not in m.new:
+        return (m.old, m.new)
+
+    import re as _re
+    # 把 `{n}` 换成正则分组，其余部分转义
+    pattern = _re.escape(m.old).replace(_re.escape("{n}"), r"(\d+)")
+    hit = _re.search(pattern, text)
+    if not hit:
+        return None
+    n = hit.group(1)
+    return (m.old.replace("{n}", n), m.new.replace("{n}", n))
+
+
 def verify_one(m: Mutation, env: dict, verbose: bool) -> dict:
     """验证一条 mutation：注入 → 测试必须红 → 还原 → 测试必须绿。"""
     target = ROOT / m.file
@@ -590,7 +646,15 @@ def verify_one(m: Mutation, env: dict, verbose: bool) -> dict:
         return result
 
     original = target.read_text(encoding="utf-8")
-    occurrences = original.count(m.old)
+    resolved = _resolve_anchor(m, original)
+    if resolved is None:
+        result.update(
+            stage="anchor",
+            detail=("锚点里的 `{n}` 解析失败 —— 目标文件里找不到匹配行。"
+                    "文档被改过？还是占位符写错了？"))
+        return result
+    old, new = resolved
+    occurrences = original.count(old)
     if occurrences != 1:
         result.update(
             stage="anchor",
@@ -609,7 +673,7 @@ def verify_one(m: Mutation, env: dict, verbose: bool) -> dict:
 
     # 注意：写盘必须用 newline="" 保持行尾原样，否则 CRLF/LF 转换会让探针失配
     try:
-        target.write_text(original.replace(m.old, m.new, 1),
+        target.write_text(original.replace(old, new, 1),
                           encoding="utf-8", newline="")
 
         # ① 注入后：测试必须失败

@@ -137,27 +137,28 @@ class PrefixCase(unittest.TestCase):
         with mock.patch.object(m.backend, "AccountSession", return_value=fake_sess):
             m._do_sync_models(db, realm=realm)
         from admin.models import ModelConfig
-        ids = {x.model_id for x in db.query(ModelConfig).all()}
+        pairs = {(x.realm, x.model_id) for x in db.query(ModelConfig).all()}
         db.close()
-        return ids
+        return pairs
 
-    def test_global_gets_prefix(self):
-        ids = self._run_sync("global", [{"id": "glm-5.1", "name": "GLM"}])
-        self.assertIn("global:glm-5.1", ids,
-                      "国际版模型应带 global: 前缀（realm 隔离）")
+    def test_global_gets_global_realm(self):
+        """国际版模型写入时 `realm='global'`，`model_id` 保持裸名。"""
+        pairs = self._run_sync("global", [{"id": "glm-5.1", "name": "GLM"}])
+        self.assertIn(("global", "glm-5.1"), pairs,
+                      "国际版模型应以 realm='global' + 裸名存储（realm 隔离）")
 
-    def test_cn_stays_bare(self):
-        """国内版沿用历史形态（无前缀）—— 零回归。"""
-        ids = self._run_sync("cn", [{"id": "glm-5.1", "name": "GLM"}])
-        self.assertIn("glm-5.1", ids)
-        self.assertNotIn("cn:glm-5.1", ids,
-                         "国内版历史上无前缀，不要改动（否则既有配置全部失配）")
+    def test_cn_gets_cn_realm(self):
+        """国内版写入时 `realm='cn'`，`model_id` 保持裸名。"""
+        pairs = self._run_sync("cn", [{"id": "glm-5.1", "name": "GLM"}])
+        self.assertIn(("cn", "glm-5.1"), pairs)
+        self.assertNotIn(("global", "glm-5.1"), pairs,
+                         "国内版不该被写成 global")
 
     def test_auto_skipped_for_both_realms(self):
         for realm in ("cn", "global"):
-            ids = self._run_sync(realm, [{"id": "auto", "name": "Auto"}])
-            self.assertNotIn("auto", ids)
-            self.assertNotIn("global:auto", ids)
+            pairs = self._run_sync(realm, [{"id": "auto", "name": "Auto"}])
+            self.assertNotIn((realm, "auto"), pairs,
+                             f"{realm} 的同步不该写入 auto（我们有自己的选型逻辑）")
 
     def test_realm_reported_in_result(self):
         db = _db()

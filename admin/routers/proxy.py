@@ -719,33 +719,54 @@ def _record_usage(key_id: int, account_id: int, model: str, credits: float | Non
             # 因此估算公式为 total_tokens * multiplier / 1000；
             # 当 total_tokens 缺失时用 completion_tokens 兜底。
             #
-            # ## ⚠️ 必须用 `requested_model`（带 realm 前缀）来找配置
+            # ## ⚠️ 必须按 (realm, 裸名) 查，不能只按名字
             #
             # 两版**同名模型的计费不同**。实测（dev 库）：
             #
-            #     hy4-preview          cn  = 0.29
-            #     global:hy4-preview   global = 0.00（免费）
+            #     hy4-preview   cn     = 0.29
+            #     hy4-preview   global = 0.00（免费）   ← 同名列，靠 realm 区分
             #
             # 而调用链里 `model` 在 proxy 入口就被剥成了裸名
-            # （`if model_realm: model = model_bare`，上游只认裸名），
-            # 于是按 `ModelConfig.model_id == model` 查会**永远命中 cn 那行** ——
-            # 调用国际版免费模型却按国内版 0.29 扣费。
+            # （`if model_realm: model = model_bare`，上游只认裸名）。
             #
-            # `requested_model` 保存的是**客户端原始请求名**（带前缀），
-            # 正好能区分两版。优先用它；没有时退回 `model`（兼容旧调用）。
+            # 改造前是给国际版模型名加 `global:` 前缀来区分的，而裸名查询
+            # **永远命中 cn 那行** —— 调用国际版免费模型却按国内版 0.29 扣费。
+            # 现在归属存进显式的 `realm` 列，(realm, model_id) 精确定位。
+            #
+            # 版本从 `requested_model`（客户端原始请求名，带前缀）解析；
+            # 没有前缀时退回 `model`，再退回账号自身 realm。
             estimated = False
             original_credits = credits
             if credits is None and (total_tokens or completion_tokens):
-                lookup = (requested_model or model or "").strip()
-                mc = None
-                if lookup:
+                req = str(requested_model or model or "").strip()
+                req_realm, req_bare = realm_mod.resolve_model_prefix(req)
+                if req_realm:
+                    rv, bare = req_realm, req_bare
+                else:
+                    # 没声明版本 → 用**账号所属版本**（选号时已确定，最可靠）
+                    rv, bare = "cn", req
+                    try:
+                        acc_row = (db.query(Account)
+                                   .filter(Account.id == account_id).first())
+                        if acc_row is not None:
+                            ar = (getattr(acc_row, "realm", "") or "").strip().lower()
+                            if ar in ("cn", "global"):
+                                rv = ar
+                    except Exception:      # noqa: BLE001
+                        pass
+                mc = (db.query(ModelConfig)
+                      .filter(ModelConfig.realm == rv,
+                              ModelConfig.model_id == bare,
+                              ModelConfig.enabled == 1).first())
+                if mc is None:
+                    # 兜底 1：老库迁移未完成时 model_id 可能还带前缀
                     mc = (db.query(ModelConfig)
-                          .filter(ModelConfig.model_id == lookup,
+                          .filter(ModelConfig.model_id == f"{rv}:{bare}",
                                   ModelConfig.enabled == 1).first())
-                if mc is None and lookup != (model or "").strip():
-                    # 原始名查不到（可能是裸名请求 / 前缀没存），退回裸名
+                if mc is None:
+                    # 兜底 2：不分 realm 找同名（宁可估个近似值，也别算 0）
                     mc = (db.query(ModelConfig)
-                          .filter(ModelConfig.model_id == (model or ""),
+                          .filter(ModelConfig.model_id == bare,
                                   ModelConfig.enabled == 1).first())
                 mult = mc.credit_multiplier if mc else 0
                 if mult:
@@ -2039,7 +2060,38 @@ def _select_account(db: Session, exclude_ids: set | None = None,
     now = datetime.utcnow()
     free_model = False
     if model and min_balance > 0:
-        config = db.query(ModelConfig).filter(ModelConfig.model_id == model, ModelConfig.level == "system").first()
+        # 免费模型判定也要按版本区分 —— 两版同名模型可能一个免费一个收费
+        # （实测 hy4-preview：cn 0.29 / global 0.00）。
+        #
+        # 改造前靠 model_id 的 `global:` 前缀，这里传进来的 `model` 是裸名，
+        # 于是**永远查到 cn 那行**：国际版免费模型会被当成收费的，
+        # 导致「免费模型不要余额」这条优化失效（能跑通，但选号范围被无谓缩小）。
+        #
+        # 现在归属存进显式 realm 列。realm 优先取调用方限定（require_realm），
+        # 其次按模型名前缀（老协议）。
+        rv = (require_realm or "").strip().lower()
+        bare = model
+        if rv not in ("cn", "global"):
+            pr, pb = realm_mod.resolve_model_prefix(str(model))
+            if pr:
+                rv, bare = pr, pb
+            else:
+                rv = ""
+        mq = db.query(ModelConfig).filter(
+            ModelConfig.model_id == bare, ModelConfig.level == "system")
+        if rv:
+            mq = mq.filter(ModelConfig.realm == rv)
+        config = mq.first()
+        if config is None and rv:
+            # 老库迁移未完成：model_id 可能还带前缀
+            config = (db.query(ModelConfig)
+                      .filter(ModelConfig.model_id == f"{rv}:{bare}",
+                              ModelConfig.level == "system").first())
+        if config is None:
+            # 再兜底：不分 realm 找（保持改造前的行为上限）
+            config = (db.query(ModelConfig)
+                      .filter(ModelConfig.model_id == bare,
+                              ModelConfig.level == "system").first())
         if config is not None and config.credit_multiplier == 0:
             free_model = True
             min_balance = 0
