@@ -261,6 +261,65 @@ def _client_auth_dir() -> str:
     return os.path.expandvars(d)
 
 
+def _reset_after_credential_update(acc: Account, new_auth_json: str) -> bool:
+    """凭据被更新时，清掉「登录态失效」相关的状态。返回是否真的换了凭据。
+
+    ## 修的是什么 bug（上游 1.0.5 同款）
+
+    账号因为上游返回 401/403 被判「登录态失效」后，`session_dead_fails` 会
+    累积、`status` 可能被置为 `disabled`、`cool_kind='session_dead'`。
+    用户重新登录拿到新凭据再导入 —— 如果这里不清状态，账号会**继续被判失效**：
+
+      * 导入明明成功了，界面上仍显示「登录态失效」
+      * 调度/选号继续跳过它（`status=disabled`）
+      * 用户以为「重新登录没用」，只能删号重加（丢掉历史用量）
+
+    这个 bug 特别隐蔽：凭据是真的换好了，只是状态没跟着复位。
+
+    ## 清什么 / 不清什么
+
+    **清**（这些都是「上一次凭据失效」的派生结果）：
+
+        session_dead_fails  —— 失效计数归零
+        cool_kind='session_dead' → 清空（别的冷却原因不动，比如积分用完）
+        cool_until          —— 仅当它是 session_dead 引起时清空
+        status=disabled     —— **仅当它是因为 session_dead 被自动停用时**恢复 active
+
+    **不清**：
+
+        * `consecutive_fails` —— 反映的是最近的整体健康度，与凭据无关
+        * **用户手动停用的账号** —— 用户点「停用」是人的决定，不能因为
+          重新导入凭据就自动启用（那会让「我明确停掉它」失效）
+        * 积分类冷却（`cool_kind` 是别的值）—— 与登录态无关
+
+    「手动停用」与「session_dead 自动停用」如何区分：看 `cool_kind`。
+    自动停用一定伴随 `cool_kind='session_dead'`；手动停用不会设这个字段。
+    """
+    same = False
+    try:
+        same = (json.loads(new_auth_json or "{}")
+                == json.loads(acc.auth_json or "{}"))
+    except (ValueError, TypeError, AttributeError):
+        # 不是合法 JSON（理论上不会发生）：保守按「变了」处理
+        same = False
+    if same:
+        return False       # 凭据没变，不动状态
+
+    # 只有当「停用原因是 session_dead」时才自动恢复启用
+    auto_disabled = (acc.cool_kind == "session_dead"
+                     and acc.status == "disabled")
+
+    acc.session_dead_fails = 0
+    acc.last_err_msg = ""
+    acc.last_err_at = None
+    if acc.cool_kind == "session_dead":
+        acc.cool_kind = ""
+        acc.cool_until = None
+    if auto_disabled:
+        acc.status = "active"
+    return True
+
+
 def _apply_meta(acc: Account, auth_json: str, profile: dict | None = None,
                 balance: dict | None = None):
     """把凭证里的元信息落到账号记录上。
@@ -724,6 +783,12 @@ def add_account(body: AccountIn, _: bool = Depends(require_admin), db: Session =
     if dup:
         # 重复上传 = 用新凭证覆盖 + 刷新余额（原来直接 return，
         # 于是重传一份新凭证后列表还显示旧余额，看起来「没生效」）
+        #
+        # 同时**清掉「登录态失效」状态**：账号因 401/403 被判失效后，
+        # 用户重新登录拿新凭据再传 —— 不清状态的话会被继续判失效，
+        # 界面上仍显示「登录态失效」，用户只能删号重加（丢历史）。
+        # 这是上游 1.0.5 修的同款 bug。
+        _reset_after_credential_update(dup, body.auth_json)
         dup.auth_json = body.auth_json
         _apply_meta(dup, body.auth_json, profile=profile, balance=balance)
         db.commit()
@@ -788,6 +853,7 @@ def batch_add(body: AccountBatchIn, _: bool = Depends(require_admin), db: Sessio
         if uid and uid in seen:
             # 已存在 -> 覆盖新凭证并刷新余额（与单条上传同口径）
             old = seen[uid]
+            changed_credential = _reset_after_credential_update(old, it.auth_json)
             old.auth_json = it.auth_json
             _apply_meta(old, it.auth_json, profile=profile, balance=balance)
             db.commit()

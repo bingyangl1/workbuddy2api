@@ -12,6 +12,32 @@ DAILY_CODES = frozenset({"6004", "6008"})
 QUEUE_CODES = frozenset({"6020", "6021", "6022"})
 
 
+def next_cn_midnight(now: datetime) -> datetime:
+    """下一个「东八区零点」（返回 naive UTC，与库里的时间口径一致）。
+
+    ## 用在哪
+
+    `6008`（`CraftRateRPDLimit`，**每天请求数**上限）的恢复时点。
+    官方客户端说明：请求配额在**次日零点**重置。
+
+    ## 为什么不能沿用「保守 24 小时」
+
+    6004（每日 token）确实没有明确的重置时点，保守给 24h 是合理的。
+    但 6008 有官方说法 —— 用 24h 会让账号**白白多等好几个小时**
+    （比如 20:00 触发，次日 00:00 就该恢复，24h 会拖到再下一天 20:00）。
+
+    比上游多一点：上游直接 `now.replace(tzinfo=UTC)`，要求传入的是 **naive UTC**；
+    这里对带时区的输入也做正确处理（先转 UTC 再当 naive 用），
+    避免调用方传了个 aware datetime 就被 `replace` 静默改掉含义。
+    """
+    if now.tzinfo is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    local = now.replace(tzinfo=timezone.utc).astimezone(CN_TIME)
+    next_midnight = (local.replace(hour=0, minute=0, second=0, microsecond=0)
+                     + timedelta(days=1))
+    return next_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def queue_retry_time(body: str, now: datetime | None = None) -> datetime | None:
     """Match the client's queue retry_after seconds/milliseconds normalization."""
     now = now or datetime.utcnow()

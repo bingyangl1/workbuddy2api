@@ -1266,22 +1266,45 @@ def _exhaustion_message(kind: str, last_msg: str, tried_accounts: int,
 
     只在提示里带错误分类与次数，不把上游原文整段抛给客户端 ——
     原文可能含内部细节，且对排障者没有额外价值（完整信息在网关日志里）。
+
+    ## 会附上官方错误码解释
+
+    如果 `last_msg` 里带了业务 code（如 6008），把官方客户端对该 code 的
+    一句话解释也带上。原因：`_EXHAUSTION_HINTS` 给的是**分类级**提示
+    （如「模型已达今日额度」），而 code 级解释更具体
+    （「今日次数已用完，明日恢复」）—— 用户据此能判断是等明天还是换模型。
+
+    解释取自 `admin/upstream_errors.py`（147 条，官方客户端文案）。
+    未知 code 就什么都不加，绝不编造。
     """
     hint = _EXHAUSTION_HINTS.get(kind or "", "未知错误")
     tried = f"已尝试 {tried_accounts} 个账号 / {tried_models} 个候选模型"
     base = f"{hint}；{tried}"
+
+    # 官方错误码解释（有就带上，没有就跳过）
+    detail = ""
+    try:
+        from admin.upstream_errors import describe
+        code = _json_code(last_msg or "")
+        if code:
+            got = describe(code)
+            if got["known"] and got["message"]:
+                detail = f"（上游 {code}：{got['message']}）"
+    except Exception:      # noqa: BLE001  解释是锦上添花，绝不能因此报错
+        detail = ""
+
     if kind == "waf" and last_msg:
-        return f"{base}，已暂停轮转；请稍后重试"
+        return f"{base}{detail}，已暂停轮转；请稍后重试"
     if kind == "no_account" and last_msg:
         # realm 前缀 / 密钥限定导致的「该版本无号」：把原因如实带出，
         # 否则客户端只看到笼统的「号池没有可用账号」。
-        return f"{base}。原因：{last_msg[:120]}"
+        return f"{base}{detail}。原因：{last_msg[:120]}"
     if kind == "transport" and last_msg:
         # 把底层原因带上（如 ReadTimeout / ConnectError），否则用户只看到
         # 「网络连接异常」而无法判断是自己网络、上游抖动还是模型卡住。
         # 只取前 120 字符，避免把上游内部细节整段抛出去。
-        return f"{base}。底层原因：{last_msg[:120]}"
-    return f"{base}。请稍后重试，或联系管理员查看网关日志。"
+        return f"{base}{detail}。底层原因：{last_msg[:120]}"
+    return f"{base}{detail}。请稍后重试，或联系管理员查看网关日志。"
 
 
 def _extract_http_status(msg: str) -> int:
@@ -1550,6 +1573,19 @@ def _apply_account_policy(db: Session, acc: Account, kind: str, status: int,
                                 reset_at=ra,
                                 fallback_seconds=max(1, _req_rate_seconds()[0]))
         elif _json_code(msg) in _MODEL_RATE_CODES:
+            # 日额度限制。恢复时点按码分档：
+            #
+            #   6008（每天**请求数**上限）→ 官方客户端说明是**次日零点**重置。
+            #        没有更精确信息时用这个，比无脑 24h 准确得多：
+            #        20:00 触发的账号次日 00:00 就该能用了，
+            #        24h 会把它白关到再下一天 20:00。
+            #
+            #   6004（每天 **token** 上限）→ 没有官方重置时点，保守 24h。
+            #
+            # 两者都是「该账号 × 该模型」的维度 —— 换号可用、同号换模型也可用。
+            if _json_code(msg) == "6008" and (reset_at is None or reset_at <= now):
+                from admin.model_limits import next_cn_midnight
+                reset_at = next_cn_midnight(datetime.utcnow())
             estimated = reset_at is None or reset_at <= now
             _set_model_cooldown(db, acc, model, "model_daily",
                                 ("[estimated] " if estimated else "") + (msg or "daily quota exhausted")[:240],

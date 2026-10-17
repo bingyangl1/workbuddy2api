@@ -94,6 +94,14 @@ dist/
 desktop/assets/*.ico
 desktop/assets/*.png
 
+# Android 构建产物与本地工具链
+android/.gradle/
+android/local.properties
+android/app/build/
+*.apk
+# 签名密钥**绝不入库**（丢了就无法覆盖升级，必须自行备份）
+build/android-signing/
+
 !scripts/build_desktop.py
 !tests/
 tests/*

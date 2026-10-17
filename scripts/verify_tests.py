@@ -224,6 +224,63 @@ MUTATIONS: list[Mutation] = [
         why="默认启用 → 新装实例在用户不知情时给全部账号发任务请求",
         tags=["schedule", "safety"],
     ),
+    # ── 上游 1.0.5 跟进（凭据复位 / 6008 零点 / 错误码解释）──────────
+    Mutation(
+        name="credential-not-reset",
+        file="admin/routers/accounts.py",
+        old=('    acc.session_dead_fails = 0\n'
+             '    acc.last_err_msg = ""'),
+        new=('    acc.last_err_msg = ""'),
+        tests=["tests/test_upstream_1_0_5.py::CredentialResetCase"],
+        why="换凭据后不清 session_dead_fails → 账号继续被判「登录态失效」，"
+            "用户只能删号重加（丢历史）。上游 1.0.5 修的同款 bug",
+        tags=["upstream", "account", "safety"],
+    ),
+    Mutation(
+        name="credential-manual-disable-overridden",
+        file="admin/routers/accounts.py",
+        old=('    auto_disabled = (acc.cool_kind == "session_dead"\n'
+             '                     and acc.status == "disabled")'),
+        new=('    auto_disabled = acc.status == "disabled"'),
+        tests=["tests/test_upstream_1_0_5.py::CredentialResetCase::"
+               "test_manually_disabled_account_stays_disabled"],
+        why="把「手动停用」也自动启用 → 用户明确停掉的账号被偷偷打开",
+        tags=["upstream", "account"],
+    ),
+    Mutation(
+        name="midnight-not-used",
+        file="admin/routers/proxy.py",
+        old=('            if _json_code(msg) == "6008" and '
+             '(reset_at is None or reset_at <= now):'),
+        new='            if False:',
+        tests=["tests/test_upstream_1_0_5.py"],
+        why="6008 不用次日零点 → 保守 24h 让账号白白多等几小时",
+        tags=["upstream", "limits"],
+    ),
+    Mutation(
+        name="error-describe-fabricates",
+        file="admin/upstream_errors.py",
+        old=('    if not item:\n'
+             '        return {"message": "", "description": "", "known": False}'),
+        new=('    if not item:\n'
+             '        return {"message": "未知错误", "description": "", '
+             '"known": False}'),
+        tests=["tests/test_upstream_1_0_5.py::UpstreamErrorsCase::"
+               "test_unknown_code_returns_empty_not_fabricated"],
+        why="未知码编造解释 → 用户被错误信息误导",
+        tags=["upstream", "errors"],
+    ),
+    Mutation(
+        name="error-explain-not-wired",
+        file="admin/routers/proxy.py",
+        old=('            if got["known"] and got["message"]:\n'
+             '                detail = f"（上游 {code}：{got[\'message\']}）"'),
+        new=('            if False:\n'
+             '                detail = ""'),
+        tests=["tests/test_upstream_1_0_5.py::ExhaustionMessageCase"],
+        why="解释函数写好了但没接进用户可见消息（典型假绿形态）",
+        tags=["upstream", "wiring"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",
