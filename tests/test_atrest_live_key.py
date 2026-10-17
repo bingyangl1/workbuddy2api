@@ -93,12 +93,40 @@ class FetchSecretCase(unittest.TestCase):
         except Exception as e:      # noqa: BLE001
             self.fail(f"探测候选时抛异常：{type(e).__name__}: {e}")
 
+    # ── 下面是「有 exe」的路径 ──────────────────────────────────
+    #
+    # ⚠️ `fetch_at_rest_secret_key()` 第一句就是
+    #     `if not exe or not os.path.isfile(exe): continue`
+    # 所以传一个**不存在**的假路径会让它直接跳过、根本不调 subprocess。
+    #
+    # 早先这些测试传 `C:\fake\WorkBuddy.exe`：
+    #   * 断言 `is None` 的几条**碰巧通过**（跳过 → None）
+    #   * 断言 `== secret` 的那条只在装了客户端的开发机…… 也过不了，
+    #     因为路径本身不存在
+    #
+    # 结果是**本地全绿、CI 全红**（Linux 上 Windows 路径更不可能存在）。
+    # 正确做法：建一个真实存在的临时文件当 exe 替身。
+
+    def _stub_exe(self):
+        """建一个真实存在的空文件充当 exe 路径。"""
+        import tempfile
+        fd, path = tempfile.mkstemp(prefix="wb_stub_exe_", suffix=".exe")
+        os.close(fd)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        return path
+
+    def _fetch(self, exe=None, **kw):
+        """屏蔽候选探测后调用（避免本机真实客户端干扰）。"""
+        with mock.patch.object(wb_crypto, "_candidate_client_exes",
+                               return_value=[]):
+            return wb_crypto.fetch_at_rest_secret_key(
+                exe if exe is not None else self._stub_exe(), **kw)
+
     def test_nonzero_exit_returns_none(self):
         """脚本非零退出（客户端拒绝/版本不符）→ None。"""
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout=b"", stderr=b"boom")
-            self.assertIsNone(
-                wb_crypto.fetch_at_rest_secret_key(r"C:\fake\WorkBuddy.exe"))
+            self.assertIsNone(self._fetch())
 
     def test_timeout_returns_none(self):
         """超时（客户端卡住）→ None，不把异常抛给调用方。"""
@@ -106,14 +134,14 @@ class FetchSecretCase(unittest.TestCase):
         with mock.patch("subprocess.run",
                         side_effect=subprocess.TimeoutExpired("x", 1)):
             self.assertIsNone(
-                wb_crypto.fetch_at_rest_secret_key(r"C:\fake\WorkBuddy.exe"))
+                self._fetch())
 
     def test_oversized_output_rejected(self):
         """输出异常长（被别的输出污染）→ 拒绝，防止误用。"""
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout=b"x" * 5000, stderr=b"")
             self.assertIsNone(
-                wb_crypto.fetch_at_rest_secret_key(r"C:\fake\WorkBuddy.exe"))
+                self._fetch())
 
     def test_garbage_output_rejected(self):
         for payload in (b"", b"not json", b"[]", b'{"other": 1}',
@@ -121,7 +149,7 @@ class FetchSecretCase(unittest.TestCase):
             with mock.patch("subprocess.run") as run:
                 run.return_value = mock.Mock(returncode=0, stdout=payload, stderr=b"")
                 self.assertIsNone(
-                    wb_crypto.fetch_at_rest_secret_key(r"C:\fake\WorkBuddy.exe"),
+                    self._fetch(),
                     f"输出 {payload!r} 不该被接受")
 
     def test_valid_output_accepted(self):
@@ -131,7 +159,7 @@ class FetchSecretCase(unittest.TestCase):
         payload = json.dumps({"atRestSecretKey": secret}).encode()
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout=payload, stderr=b"")
-            out = wb_crypto.fetch_at_rest_secret_key(r"C:\fake\WorkBuddy.exe")
+            out = self._fetch()
         self.assertEqual(out, secret)
 
     def test_node_mode_env_set_and_node_options_stripped(self):
@@ -149,7 +177,7 @@ class FetchSecretCase(unittest.TestCase):
         os.environ["NODE_OPTIONS"] = "--require=/evil.js"
         try:
             with mock.patch("subprocess.run", side_effect=_fake):
-                wb_crypto.fetch_at_rest_secret_key(r"C:\fake\WorkBuddy.exe")
+                self._fetch()
         finally:
             os.environ.pop("NODE_OPTIONS", None)
 
