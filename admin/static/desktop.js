@@ -158,5 +158,22 @@ window.WBDesktop = (() => {
       .filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim();
   });
   if (window.pywebview?.api) initializeNative();
-  return {openUpdates, retryLocal: initializeNative};
+  return {
+    openUpdates,
+    retryLocal: initializeNative,
+    // ── 供 `android/web/mobile.js` 调用 ──────────────────────────────
+    //
+    // 安卓端在 `WBMobile.initialize()` 里调了 `WBDesktop.checkUpdatesAtStartup()`，
+    // 但这里**从来没导出过这个名字** → 抛 TypeError。
+    //
+    // 后果连锁：`WBMobile.initialize()` 在「移除 localBoot 引导层」**之前**
+    // 就抛了异常 → 用户界面永远停在「正在打开本地工作台…」。
+    // 而 WebView 默认不转发 console 日志，所以看起来像「服务连不上」。
+    //
+    // 修法：把它导出成一个**实际启动更新检查**的函数（与桌面端启动时
+    // 的行为一致：`check(true)` 表示「自动检查」——不弹窗，只更新角标）。
+    checkUpdatesAtStartup: () => {
+      try { check(true); } catch (_) { /* 更新检查失败不该影响进主界面 */ }
+    },
+  };
 })();

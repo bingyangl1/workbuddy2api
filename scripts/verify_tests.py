@@ -385,6 +385,30 @@ MUTATIONS: list[Mutation] = [
         why="保留空 tool_use_id → 上游看到无法配对的 tool 消息，同样 11148",
         tags=["anthropic", "safety"],
     ),
+    # ── 安卓 WebView 引导层（真机实测发现）──────────────────────────
+    Mutation(
+        name="android-missing-export",
+        file="admin/static/desktop.js",
+        old="    checkUpdatesAtStartup: () => {",
+        new="    _checkUpdatesAtStartup: () => {",
+        tests=["tests/test_android_webview_boot.py::WbDesktopExportsCase"],
+        why="mobile.js 调用 WBDesktop.checkUpdatesAtStartup 但没导出 → "
+            "TypeError → 引导层永不消失 → 界面永久卡在「正在打开本地工作台」"
+            "（OnePlus 9 真机实测）",
+        tags=["android", "webview"],
+    ),
+    Mutation(
+        name="android-overlay-order",
+        file="android/web/mobile.js",
+        old=("      document.getElementById('localBoot')?.remove();\n"
+             "      try { enterApp(); }"),
+        new=("      try { enterApp(); }\n"
+             "      document.getElementById('localBoot')?.remove();"),
+        tests=["tests/test_android_webview_boot.py::LoadingOverlayCase"],
+        why="把移除引导层放到 enterApp 之后 → enterApp 一抛异常，"
+            "用户永久卡在启动画面（服务其实是好的，且 WebView 不转发 console）",
+        tags=["android", "webview"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

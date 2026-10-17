@@ -22,13 +22,33 @@ window.WBMobile = (() => {
     localStorage.setItem(TOKEN_KEY, token);
     if (!initialized) {
       initialized = true;
-      enterApp();
+      // ── 顺序很关键：**先拆掉引导层，再做任何可能失败的事** ──────────
+      //
+      // 原来这里是 enterApp() → 移除 localBoot → topbarMode →
+      // WBDesktop.checkUpdatesAtStartup()。中间任何一步抛异常，
+      // 后面的「移除 localBoot」就永远不执行 —— 用户界面卡在
+      // 「正在打开本地工作台…」，而服务其实是好的（curl 返回 200）。
+      //
+      // 而 WebView 默认不转发 console 错误，所以这种失败**完全没有
+      // 可见线索**，只能靠猜。实测就是被这个坑住的。
+      //
+      // 现在：先无条件拆引导层（进入主界面），再把每个可选项单独 try。
       document.getElementById('localBoot')?.remove();
-      document.getElementById('topbarMode').textContent = '手机本地运行';
-      WBDesktop.checkUpdatesAtStartup();
-      window.WBMobileSettings?.start();
+      try { enterApp(); } catch (e) { console.error('enterApp failed', e); }
+      try {
+        const modeEl = document.getElementById('topbarMode');
+        if (modeEl) modeEl.textContent = '手机本地运行';
+      } catch (e) { console.error('topbarMode failed', e); }
+      // 更新检查是**纯附加**功能：失败绝不该阻断进入主界面，
+      // 也不该在方法不存在时抛 TypeError（早期版本没导出这个方法）。
+      try { window.WBDesktop?.checkUpdatesAtStartup?.(); }
+      catch (e) { console.error('checkUpdatesAtStartup failed', e); }
+      try { window.WBMobileSettings?.start(); }
+      catch (e) { console.error('mobile settings failed', e); }
     }
-    if (document.getElementById('app').classList.contains('hidden')) enterApp();
+    try {
+      if (document.getElementById('app')?.classList.contains('hidden')) enterApp();
+    } catch (e) { console.error('enterApp retry failed', e); }
     window.dispatchEvent(new Event('wb-shell-resume'));
   }
   document.documentElement.classList.add('mobile-mode', 'desktop-mode');
