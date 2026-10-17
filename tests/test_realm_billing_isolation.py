@@ -149,34 +149,30 @@ class ProxyUsesRequestedModelCase(unittest.TestCase):
             encoding="utf-8")
 
     def test_lookup_uses_realm_and_bare_name(self):
-        """**行为级**断言：必须按 `(realm, 裸名)` 查配置。
+        """**行为级**断言：倍率查找段必须用 `(realm, 裸名)` 查。
 
-        改造后归属存进显式的 `ModelConfig.realm` 列，所以查找必须：
+        反向验证抓到过两次假绿：
+        ① 只查 `requested_model in body` —— 注释里也有这个词；
+        ② 只查 `resolve_model_prefix` 出现 —— billing_realm 段（记账用）
+           也调它，把**倍率段**的解析删掉后断言仍通过。
 
-          1. 从 `requested_model` 解析出 realm（`resolve_model_prefix`）
-          2. 按 `ModelConfig.realm == rv` 过滤
-          3. 用**裸名**匹配 `ModelConfig.model_id`
-
-        不能只查 `"requested_model" in body` —— 反向验证抓到过假绿：
-        mutation 把逻辑改掉时，注释里仍有那个词，断言照样通过。
+        所以这里切出**倍率估算段**（`if credits is None and (...)` 之后）
+        单独断言，且要求 `req_realm` 被**用于过滤**（ModelConfig.realm == rv）。
         """
         import re
-        m = re.search(
-            r"def _record_usage\(.*?(?=\ndef |\nclass )", self.src, re.S)
+        m = re.search(r"def _record_usage\(.*?(?=\ndef |\nclass )", self.src, re.S)
         self.assertIsNotNone(m, "找不到 _record_usage")
         body = m.group(0)
-        # 必须解析 realm
-        self.assertIn("resolve_model_prefix", body,
-                      "**估算倍率时必须先解析模型的 realm** —— "
-                      "只用裸名查会永远命中 cn 那行")
-        # 必须按 realm 列过滤
+        # 切出倍率估算段
+        i = body.find("if credits is None and (total_tokens or completion_tokens):")
+        self.assertGreater(i, 0, "找不到倍率估算段")
+        seg = body[i:i + 1500]
         self.assertRegex(
-            body, r"ModelConfig\.realm\s*==",
-            "**必须按 ModelConfig.realm 过滤** —— 否则两版同名模型查询会串")
-        # 必须从 requested_model 取原始名（带前缀）
+            seg, r"req_realm, req_bare\s*=\s*realm_mod\.resolve_model_prefix",
+            "**倍率估算段必须解析 realm** —— 删了它就永远按裸名查 cn 那行")
         self.assertRegex(
-            body, r"requested_model",
-            "应从 requested_model（客户端原始名）解析 realm")
+            seg, r"ModelConfig\.realm\s*==\s*rv",
+            "**必须按 ModelConfig.realm == rv 过滤** —— 否则两版同名查询会串")
 
     def test_comment_explains_realm(self):
         """注释里应说明两版同名模型倍率不同（防后人「简化」掉）。"""

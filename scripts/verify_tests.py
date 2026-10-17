@@ -496,6 +496,52 @@ MUTATIONS: list[Mutation] = [
             "同一个模型被算两次、倍率随机命中一条",
         tags=["db", "realm"],
     ),
+    # ── #5/#2/#4/#6 用户需求（2026-10 第二批）──────────────────────
+    Mutation(
+        name="usage-log-no-realm",
+        file="admin/routers/proxy.py",
+        old=("                seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms, error_kind=error_kind or \"\",\n"
+             "                realm=billing_realm,"),
+        new="                seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms, error_kind=error_kind or \"\",  # (mutation) 不记 realm",
+        tests=["tests/test_panel_requirements.py::UsageLogRealmCase"
+               "::test_record_usage_writes_realm"],
+        why="日志不记版本 → 两版同名模型混计，用户看统计被误导",
+        tags=["realm", "billing"],
+    ),
+    Mutation(
+        name="group-dialog-loses-multiplier",
+        file="web/app/(main)/models/page.tsx",
+        old="      <GroupEditDialog target={groupEdit} allModels={configs}",
+        new="      <GroupEditDialog target={groupEdit} allModels={configs.map((c) => c.model_id) as never}",
+        tests=["tests/test_panel_requirements.py::GroupDialogMultiplierCase"
+               "::test_dialog_receives_full_configs"],
+        why="只传 model_id 字符串数组时倍率被丢弃，按价格建分组无从判断",
+        tags=["panel"],
+    ),
+    Mutation(
+        name="playground-no-realm-guard",
+        file="admin/routers/playground.py",
+        old=("        if want_realm and acc_realm and acc_realm != want_realm:\n"
+             "            return JSONResponse(\n"
+             "                status_code=400,"),
+        new=("        if False and want_realm and acc_realm != want_realm:\n"
+             "            return JSONResponse(\n"
+             "                status_code=400,"),
+        tests=["tests/test_panel_requirements.py::PlaygroundAccountCase"
+               "::test_backend_realm_guard"],
+        why="拿 cn 账号测 global 模型 → 混用身份出站（风控特征）",
+        tags=["realm", "safety"],
+    ),
+    Mutation(
+        name="appsource-no-realms",
+        file="admin/routers/app_source.py",
+        old="        \"paths_config\": wb_paths.current(),\n        \"realms\": realms_out,",
+        new="        \"paths_config\": wb_paths.current(),  # (mutation) 不暴露 realms",
+        tests=["tests/test_panel_requirements.py::AppSourceRealmCase"
+               "::test_status_exposes_realms"],
+        why="status 不返回两版目录 → 用户以为另一版没装",
+        tags=["panel"],
+    ),
     # ── 数据库后端 ──────────────────────────────────────────────────
     Mutation(
         name="sqlite-pragmas",

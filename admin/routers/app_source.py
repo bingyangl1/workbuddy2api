@@ -91,10 +91,31 @@ class UnpackIn(BaseModel):
 
 
 def _status_payload() -> dict:
-    """组装状态：路径、安装包、产物统计、开发工具开关。"""
+    """组装状态：路径、安装包、产物统计、开发工具开关。
+
+    `realms` 键是**两版各自的安装目录**（#6 用户要求）：
+    `{cn: {...}, global: {...}}`。`install_dir` / `asar` 等顶层键仍是
+    主探测（cn）的结果 —— 既有前端契约不变。
+    """
     WB = _wb()
     paths = WB.describe_paths()
     stat = WB.source_stat()
+    # 两版安装目录分别探测（不互相覆盖）：一台机器可能两个版本都装了
+    #（实测本机 D:\Software\WorkBuddy 是 cn、D:\Software\WorkBuddyAI 是 global）。
+    # 主探测只返回一个 —— 只看顶层键会以为「只装了一个版本」。
+    realms_out: dict[str, dict] = {}
+    for r in ("cn", "global"):
+        try:
+            d = WB._realm_data(r)
+            realms_out[r] = {
+                "install_dir": str(d.get("install_dir") or ""),
+                "desktop_version": d.get("desktop_version") or "",
+                "application_name": d.get("application_name") or "",
+                "found": bool(d.get("install_dir")),
+            }
+        except Exception:      # noqa: BLE001
+            realms_out[r] = {"install_dir": "", "desktop_version": "",
+                             "application_name": "", "found": False}
     return {
         "dev_tools": bool(getattr(settings, "DEV_TOOLS", True)),
         **paths,
@@ -104,6 +125,7 @@ def _status_payload() -> dict:
         "python": sys.version.split()[0],
         "node": _node_version(),
         "paths_config": wb_paths.current(),
+        "realms": realms_out,
     }
 
 
@@ -136,12 +158,28 @@ def status(_: bool = Depends(require_admin)):
 
 
 @router.post("/detect")
-def detect(_: bool = Depends(require_admin)):
-    """丢弃缓存重新扫描本机安装目录（用户刚装了客户端时用）。"""
+def detect(realm: str = "", _: bool = Depends(require_admin)):
+    """丢弃缓存重新扫描本机安装目录（用户刚装了客户端时用）。
+
+    `realm`（cn / global）：扫描哪一版的目录。空 = 主探测（兼容既有前端）。
+    两版的安装目录**不同**（WorkBuddy / WorkBuddyAI），只扫一个会让人以为
+    「另一版没装」（本机实测两版都装了，主探测只报出一个）。
+    """
     _guard()
     WB = _wb()
     WB.refresh()
     p = _status_payload()
+    # 按 realm 挑出对应探测结果
+    r = (realm or "").strip().lower()
+    if r in ("cn", "global"):
+        rd = (p.get("realms") or {}).get(r) or {}
+        p["ok"] = bool(rd.get("found"))
+        p["install_dir"] = rd.get("install_dir") or ""
+        if not p["ok"]:
+            p["message"] = (
+                f"未扫描到{'国内版' if r == 'cn' else '国际版'}安装目录。"
+                "可在下方手动指定该版本的安装路径。")
+        return p
     p["ok"] = bool(p.get("install_dir"))
     if not p.get("install_dir"):
         p["message"] = ("未扫描到 WorkBuddy 安装目录。可在下方手动指定安装路径"

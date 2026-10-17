@@ -289,6 +289,15 @@ def init_db() -> bool:
         _ensure_unique("model_configs", "uq_model_configs_level_realm_model",
                        ("level", "realm", "model_id"))
 
+        # 迁移：usage_logs 加 realm 列（#5 日志按版本区分）
+        #
+        # 老库既有行没有版本信息，默认 'cn' 是「当时只有国内版」这个事实的
+        # 如实反映 —— 不做反推（凭 model 名猜版本不可靠，宁可显式留 cn，
+        # 用户看得见口径，也不要悄悄猜错）。新写入由 _record_usage 填。
+        _ensure_column("usage_logs", "realm", "VARCHAR(16)", "DEFAULT 'cn'")
+        _ensure_index("usage_logs", "ix_usage_logs_realm_created",
+                      ("realm", "created_at"))
+
         # 迁移（P2 铺轨）：新表 audit_logs / api_tokens 由 create_all 建，
         # 但老库升级路径上索引同样需要显式兜底（见 _ensure_index 的说明：
         # create_all 对已存在的表不做任何事）。

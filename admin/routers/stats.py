@@ -49,6 +49,7 @@ def usage_stats(
     model: Optional[str] = None,
     account_id: Optional[int] = None,
     use_case: Optional[str] = None,
+    realm: str = "",
     _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
@@ -57,11 +58,12 @@ def usage_stats(
     默认 **近 1 天 / 按小时**：这是「今天用得怎么样」最常见的诉求，
     默认 14 天会把当天的问题稀释在两周的曲线里，看不出异常。
 
-    支持按 `key_id` / `model` / `account_id` / `use_case` 筛选：
+    支持按 `key_id` / `model` / `account_id` / `use_case` / `realm` 筛选：
     筛选后**所有**图与卡片都跟着变（同一份 where 条件），
     这样「某个 Key 今天花了多少」是直接可读的，不用自己心算做减法。
 
-    返回结构直接对应前端「使用记录」页面，避免前端多次请求拼装。
+    `realm`（cn / global）：同名模型两版计费不同，不区分版本
+    就会把两版混成一条统计（用户实测反馈）。空 = 不限。
     """
     since = _window(days)
 
@@ -77,6 +79,8 @@ def usage_stats(
         filters.append(UsageLog.account_id == account_id)
     if use_case:
         filters.append(UsageLog.use_case == use_case)
+    if (realm or "").strip().lower() in ("cn", "global"):
+        filters.append(UsageLog.realm == (realm or "").strip().lower())
 
     def _f(q):
         return q.filter(*filters)

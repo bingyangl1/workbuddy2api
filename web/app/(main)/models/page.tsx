@@ -55,6 +55,9 @@ export default function ModelsPage() {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
+  // 排序方式：默认按模型名（原行为）；可切按倍率（升序，免费在前）。
+  // 按价格筛模型/建分组是高频场景，没有排序只能肉眼扫全表。
+  const [sortBy, setSortBy] = useState<'model' | 'mult'>('model');
   const [speedOf, setSpeedOf] = useState<ModelConfig | null>(null);
   const [groupEdit, setGroupEdit] = useState<ModelGroup | 'new' | null>(null);
   const [groupDelete, setGroupDelete] = useState<ModelGroup | null>(null);
@@ -88,10 +91,17 @@ export default function ModelsPage() {
   const filtered = useMemo(() => {
     if (!configs) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return configs;
-    return configs.filter((c) =>
-      c.model_id.toLowerCase().includes(q) || (c.note || '').toLowerCase().includes(q));
-  }, [configs, query]);
+    let arr = configs;
+    if (q) {
+      arr = arr.filter((c) =>
+        c.model_id.toLowerCase().includes(q) || (c.note || '').toLowerCase().includes(q));
+    }
+    if (sortBy === 'mult') {
+      arr = [...arr].sort((a, b) => (a.credit_multiplier || 0) - (b.credit_multiplier || 0)
+                                   || a.model_id.localeCompare(b.model_id));
+    }
+    return arr;
+  }, [configs, query, sortBy]);
 
   const enabledCount = useMemo(() => (configs || []).filter((c) => c.enabled).length, [configs]);
 
@@ -120,7 +130,11 @@ export default function ModelsPage() {
       // 不传的话后端只能按 id 挑第一个活跃账号 —— 切到国际版时依然会拿国内版
       // 账号去拉、把国内版清单写进库（用户实测报过这个现象）。
       const r = await modelApi.sync(realm);
-      notify.ok(t('models.synced', {added: r.added, updated: r.updated, total: r.total_in_db}));
+      // 提示里带版本 + 源账号：同步的正确性过去出过好几次「看起来同步了
+      // 但拿到的是另一版清单」的问题，用户无从分辨 —— 提示必须能自证清白。
+      notify.ok(t('models.syncedWithRealm', {
+        realm: r.realm || realm, added: r.added, updated: r.updated,
+        acc: r.source_account_id ?? '?'}));
       await load();
     } catch (e) { notify.err(errText(e)); }
     finally { setSyncing(false); }
@@ -143,10 +157,19 @@ export default function ModelsPage() {
         title={t('models.title')}
         description={t('models.subtitle', {n: configs.length, enabled: enabledCount})}
         actions={
-          <Button size="sm" onClick={doSync} disabled={syncing}>
-            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {t('models.sync')}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* 倍率排序切换：按价格找模型是高频场景 */}
+            <Button size="sm" variant="outline" onClick={() => setSortBy((s) => s === 'mult' ? 'model' : 'mult')}
+                    title={t('models.sortByMultiplier')}>
+              {sortBy === 'mult' ? t('models.sortByMultiplier') : t('models.sortByModel')}
+            </Button>
+            <Button size="sm" onClick={doSync} disabled={syncing}>
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {/* 按钮上标明当前版本：两版上游不同，同步结果只对当前版本生效，
+                  不标的话用户点了国际版却不知道拉的是哪版（用户实测反馈过）。 */}
+              {t('models.sync')} · {realmLabel}
+            </Button>
+          </div>
         }
       />
 
@@ -240,7 +263,7 @@ export default function ModelsPage() {
       </Tabs>
 
       <SpeedTestDialog target={speedOf} onClose={() => setSpeedOf(null)} />
-      <GroupEditDialog target={groupEdit} allModels={configs.map((c) => c.model_id)}
+      <GroupEditDialog target={groupEdit} allModels={configs}
                        onClose={() => setGroupEdit(null)} onSaved={() => { setGroupEdit(null); load(); }} />
       <GroupDeleteDialog target={groupDelete} onClose={() => setGroupDelete(null)}
                          onDeleted={() => { setGroupDelete(null); load(); }} />
@@ -369,7 +392,7 @@ function StatBox({label, value}: {label: string; value: string}) {
 
 /* ── 分组编辑（模型多选，全量覆盖语义）────────────────────────────────── */
 function GroupEditDialog({target, allModels, onClose, onSaved}: {
-  target: ModelGroup | 'new' | null; allModels: string[];
+  target: ModelGroup | 'new' | null; allModels: ModelConfig[];
   onClose: () => void; onSaved: () => void;
 }) {
   const t = useT();
@@ -393,7 +416,12 @@ function GroupEditDialog({target, allModels, onClose, onSaved}: {
 
   if (target === null) return null;
 
-  const shown = allModels.filter((m) => !q || m.toLowerCase().includes(q.toLowerCase()));
+  // 显示积分倍率：按价格建分组是分组的主要场景之一，只给名字没法判断贵贱。
+  // 搜索仍按名字匹配；列表按「免费 → 便宜 → 贵」排，免费模型天然排前面。
+  const shown = allModels
+    .filter((c) => !q || c.model_id.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (a.credit_multiplier || 0) - (b.credit_multiplier || 0)
+                    || a.model_id.localeCompare(b.model_id));
 
   function togglePick(m: string) {
     setPicked((prev) => {
@@ -444,11 +472,18 @@ function GroupEditDialog({target, allModels, onClose, onSaved}: {
             </div>
             <div className="max-h-56 overflow-y-auto rounded-md border p-2">
               <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                {shown.map((m) => (
-                  <label key={m} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted">
-                    <input type="checkbox" checked={picked.has(m)} onChange={() => togglePick(m)}
+                {shown.map((c) => (
+                  <label key={c.model_id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted">
+                    <input type="checkbox" checked={picked.has(c.model_id)} onChange={() => togglePick(c.model_id)}
                            className="h-3.5 w-3.5 accent-primary" />
-                    <span className="font-mono text-xs">{m}</span>
+                    <span className="font-mono text-xs">{c.model_id}</span>
+                    {/* 积分倍率：0 = 免费（绿色「免费」角标），其余显示倍数 */}
+                    <span className={'ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none '
+                      + ((c.credit_multiplier || 0) === 0
+                         ? 'bg-emerald-50 text-emerald-700'
+                         : 'bg-slate-100 text-slate-600')}>
+                      {(c.credit_multiplier || 0) === 0 ? t('models.free') : `x${c.credit_multiplier}`}
+                    </span>
                   </label>
                 ))}
               </div>

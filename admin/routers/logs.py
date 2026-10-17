@@ -94,7 +94,7 @@ def _name_maps(db: Session, key_ids: set[int], acc_ids: set[int]) -> tuple[dict,
 
 
 def _build_filters(q, *, key_id, account_ids, models, model, key, account,
-                   client_ip, start, end, db: Session):
+                   client_ip, start, end, db: Session, realm: str = ""):
     """构造统一的 where 条件（列表与导出共用，保证口径一致）。
 
     返回 `(query, short_circuit)`：`short_circuit=True` 表示「筛选条件不可能
@@ -108,6 +108,10 @@ def _build_filters(q, *, key_id, account_ids, models, model, key, account,
     「不过滤」，于是「按一个不存在的账号名筛选」会返回**全表**记录 ——
     这是最容易被误认为「功能正常」的一类错：界面上看起来有数据，
     只是数据是错的。所以这里对空集合显式短路。
+
+    `realm`（cn / global）：同名模型两版计费不同，日志按版本过滤
+    才能把两版的量分开看（用户实测反馈「同模型不同版本不能混计」）。
+    空 = 不限。
     """
     if account_ids is not None and len(account_ids) == 0:
         return q, True
@@ -119,6 +123,8 @@ def _build_filters(q, *, key_id, account_ids, models, model, key, account,
         q = q.filter(UsageLog.model.in_(models))
     if model:
         q = q.filter(UsageLog.model == model)
+    if (realm or "").strip().lower() in ("cn", "global"):
+        q = q.filter(UsageLog.realm == (realm or "").strip().lower())
     if key:
         kids = _resolve_ids_by_name(db, ApiKey, key, ("name",))
         if not kids:
@@ -147,6 +153,8 @@ def _serialize(rows, key_names: dict, acc_names: dict) -> list[dict]:
             "model": r.model,
             # P2 T6：原始请求模型名（别名命中时与 model 不同，对账用）
             "requested_model": getattr(r, "requested_model", "") or "",
+            # 版本归属：同模型两版计费不同，前端按此区分展示
+            "realm": getattr(r, "realm", "") or "cn",
             "credits": r.credits,
             "prompt_tokens": r.prompt_tokens,
             "completion_tokens": r.completion_tokens,
@@ -178,6 +186,7 @@ def list_logs(
     end: Optional[str] = None,
     before_id: Optional[int] = None,  # keyset 分页游标（深翻页用，比 OFFSET 快）
     with_total: bool = True,          # 深翻页时可关掉总数统计省一次扫描
+    realm: str = "",                  # cn / global：同模型两版不能混计
     _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
@@ -205,7 +214,7 @@ def list_logs(
         db.query(UsageLog),
         key_id=key_id, account_ids=account_ids, models=None, model=model,
         key=key, account=name_term,
-        client_ip=client_ip, start=start, end=end, db=db,
+        client_ip=client_ip, start=start, end=end, db=db, realm=realm,
     )
 
     if short:
@@ -255,6 +264,7 @@ def export_logs(
     start: Optional[str] = None,
     end: Optional[str] = None,
     limit: int = 50000,
+    realm: str = "",
     _: bool = Depends(require_admin_read),
     db: Session = Depends(get_db),
 ):
@@ -273,13 +283,13 @@ def export_logs(
         db.query(UsageLog),
         key_id=key_id, account_ids=account_ids, models=None, model=model,
         key=key, account=name_term,
-        client_ip=client_ip, start=start, end=end, db=db,
+        client_ip=client_ip, start=start, end=end, db=db, realm=realm,
     )
 
     buf = io.StringIO()
     buf.write("\ufeff")  # UTF-8 BOM，保证 Excel 正确识别中文
     w = csv.writer(buf)
-    w.writerow(["ID", "Key", "账号", "模型", "积分", "提示tokens", "补全tokens", "缓存tokens", "总tokens",
+    w.writerow(["ID", "Key", "账号", "模型", "版本", "积分", "提示tokens", "补全tokens", "缓存tokens", "总tokens",
                 "TTFB(ms)", "总耗时(ms)", "结果", "客户端IP", "用途", "时间(北京)"])
 
     if not short:
@@ -300,6 +310,7 @@ def export_logs(
                 key_names.get(r.api_key_id) or f"#{r.api_key_id}",
                 acc_names.get(r.account_id) or f"#{r.account_id}",
                 r.model,
+                getattr(r, "realm", "") or "cn",
                 r.credits,
                 r.prompt_tokens if r.prompt_tokens is not None else "",
                 r.completion_tokens if r.completion_tokens is not None else "",

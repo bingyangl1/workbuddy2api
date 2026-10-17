@@ -13,8 +13,8 @@
  * 对齐 routers/playground.py。
  */
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {modelApi, errText, readToken} from '@/lib/api';
-import type {CatalogModel} from '@/lib/types';
+import {modelApi, accountApi, errText, readToken} from '@/lib/api';
+import type {Account, CatalogModel} from '@/lib/types';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
 import {useT} from '@/lib/i18n/provider';
@@ -48,6 +48,10 @@ export default function PlaygroundPage() {
   const [streaming, setStreaming] = useState(false);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState('');
+  // #4 手动指定账号：按版本从账号池里挑一个具体账号测试。
+  // 默认 'auto' = 号池状态机自动选（原行为不变）。
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accId, setAccId] = useState('auto');
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -62,6 +66,16 @@ export default function PlaygroundPage() {
         setModelId(enabled[0].id);
       }
     }).catch((e) => setError(errText(e)));
+  }, [realm]);
+
+  // 加载当前 realm 的账号（#4：测试台按版本挑具体账号）。
+  // 只列活跃的 —— 死号测出的结果没有参考价值。
+  useEffect(() => {
+    setAccId('auto');
+    accountApi.list().then((res) => {
+      const mine = res.items.filter((a) => a.realm === realm && a.status === 'active');
+      setAccounts(mine);
+    }).catch(() => setAccounts([]));
   }, [realm]);
 
   const current = useMemo(() => models?.find((m) => m.id === modelId) || null, [models, modelId]);
@@ -106,6 +120,8 @@ export default function PlaygroundPage() {
           messages: nextMsgs.map((m) => ({role: m.role, content: m.content})),
           stream: true,
           ...(effort ? {reasoning_effort: effort} : {}),
+          // #4 手动选号：'auto' = 号池自动选；数字 = 用那个具体账号
+          ...(accId !== 'auto' ? {account_id: Number(accId)} : {}),
         }),
         signal: ctrl.signal,
       });
@@ -219,6 +235,21 @@ export default function PlaygroundPage() {
             </SelectContent>
           </Select>
         )}
+        {/* #4 账号选择：默认自动；可指定当前版本下的具体账号来测。
+            只列活跃账号 —— 指定死号测出的结果没有参考价值。 */}
+        <Select value={accId} onValueChange={setAccId} disabled={streaming}>
+          <SelectTrigger className="w-[200px]" aria-label={t('playground.accountLabel')}>
+            <SelectValue placeholder={t('playground.accountLabel')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{t('playground.accountAuto')}</SelectItem>
+            {accounts.map((a) => (
+              <SelectItem key={a.id} value={String(a.id)}>
+                #{a.id} {a.name || a.uid}{a.realm !== realm ? ` (${a.realm})` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button size="sm" variant="outline" onClick={clear} disabled={streaming || !messages.length}>
           <Trash2 className="h-4 w-4" />{t('playground.clear')}
         </Button>

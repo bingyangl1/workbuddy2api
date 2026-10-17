@@ -36,6 +36,7 @@ import {Badge} from '@/components/ui/badge';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
+import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import {Textarea} from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -53,7 +54,7 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {AlertTriangle, Cat, Coins, Download, Flame, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2, Wrench} from 'lucide-react';
+import {AlertTriangle, Cat, Coins, Download, Flame, Loader2, Plus, RefreshCw, Search, ShieldCheck, Timer, Trash2, Wrench} from 'lucide-react';
 
 export default function AccountsPage() {
   const t = useT();
@@ -125,6 +126,26 @@ export default function AccountsPage() {
       notify.ok(t('accounts.refreshed', {name: a.name}),
                 t('accounts.balanceNow', {n: fmtNumber(r.balance_remain)}));
       await load();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** 按账号导出：后端 /api/accounts/export 支持 ids 粒度，
+   *  传单个 id 就只导这一条（auth_json 原文，可直接再导入）。 */
+  async function exportOne(a: Account) {
+    setBusyId(a.id);
+    try {
+      const blob = await accountApi.export([a.id]);
+      const url = URL.createObjectURL(blob);
+      const el = document.createElement('a');
+      el.href = url;
+      el.download = `wb-account-${a.uid || a.id}.txt`;
+      el.click();
+      URL.revokeObjectURL(url);
+      notify.ok(t('accounts.exportedOne', {name: a.name}));
     } catch (e) {
       notify.err(errText(e));
     } finally {
@@ -323,6 +344,10 @@ export default function AccountsPage() {
                               disabled={busyId === a.id} onClick={() => refreshBalance(a)}>
                         <RefreshCw className={cn('h-4 w-4', busyId === a.id && 'animate-spin')} />
                       </Button>
+                      <Button variant="ghost" size="sm" title={t('accounts.exportOne')}
+                              onClick={() => exportOne(a)}>
+                        <Download className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="sm" title={t('accounts.catTravelHint')}
                               disabled={catId === a.id || a.status !== 'active'}
                               onClick={() => catTravel(a)}>
@@ -462,11 +487,13 @@ function AccountStateBadges({a}: {a: Account}) {
   );
 }
 
-/* ── 添加账号（auth_json 凭证，服务端真验证）───────────────────── */
+/* ── 添加账号（三种方式：凭证粘贴 / 手机验证码 / 官方登录接力）──────── */
 function AddAccountDialog({open, onClose, onDone}: {
   open: boolean; onClose: () => void; onDone: () => void;
 }) {
   const t = useT();
+  const {realm} = useRealm();
+  const [tab, setTab] = useState<'json' | 'phone' | 'official'>('json');
   const [name, setName] = useState('');
   const [authJson, setAuthJson] = useState('');
   const [busy, setBusy] = useState(false);
@@ -495,28 +522,235 @@ function AddAccountDialog({open, onClose, onDone}: {
     <Dialog open={open} onOpenChange={(v: boolean) => !v && onClose()}>
       <DialogContent>
         <DialogHeader><DialogTitle>{t('accounts.addTitle')}</DialogTitle></DialogHeader>
-        <div className="flex flex-col gap-3">
-          <div className="space-y-1.5">
-            <Label>{t('accounts.nameOptional')}</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)}
-                   placeholder={t('accounts.namePlaceholder')} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>{t('accounts.authJson')}</Label>
-            <Textarea value={authJson} onChange={(e) => setAuthJson(e.target.value)}
-                      placeholder='{"accessToken":"...","refreshToken":"...",...}'
-                      rows={7} className="font-mono text-xs" />
-            <p className="text-[11px] text-muted-foreground">{t('accounts.authJsonHint')}</p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button onClick={submit} disabled={busy}>
-            {busy ? t('common.submitting') : t('accounts.addSubmit')}
-          </Button>
-        </DialogFooter>
+        {/* 三种添加方式。默认跟当前面板版本：国内版优先手机验证码（最顺），
+            国际版优先官方接力（上游没有国际版短信链）。凭证粘贴永远可用。 */}
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+          <TabsList className="grid grid-cols-3">
+            <TabsTrigger value="phone" className={realm === 'cn' ? 'text-xs' : 'text-xs opacity-80'}>
+              {t('accounts.tabPhone')}
+            </TabsTrigger>
+            <TabsTrigger value="official" className={realm === 'global' ? 'text-xs' : 'text-xs opacity-80'}>
+              {t('accounts.tabOfficial')}
+            </TabsTrigger>
+            <TabsTrigger value="json" className="text-xs">{t('accounts.tabJson')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="json" className="mt-3">
+            <div className="flex flex-col gap-3">
+              <div className="space-y-1.5">
+                <Label>{t('accounts.nameOptional')}</Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)}
+                       placeholder={t('accounts.namePlaceholder')} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t('accounts.authJson')}</Label>
+                <Textarea value={authJson} onChange={(e) => setAuthJson(e.target.value)}
+                          placeholder='{"accessToken":"...","refreshToken":"...",...}'
+                          rows={7} className="font-mono text-xs" />
+                <p className="text-[11px] text-muted-foreground">{t('accounts.authJsonHint')}</p>
+              </div>
+              <Button onClick={submit} disabled={busy} className="self-end">
+                {busy ? t('common.submitting') : t('accounts.addSubmit')}
+              </Button>
+            </div>
+          </TabsContent>
+          <TabsContent value="phone" className="mt-3">
+            <PhoneLoginFlow onDone={onDone} />
+          </TabsContent>
+          <TabsContent value="official" className="mt-3">
+            <OfficialLoginFlow realm={realm} onDone={onDone} />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ── 手机验证码登录（国内版专用；上游没有国际版短信链）────────────── */
+function PhoneLoginFlow({onDone}: {onDone: () => void}) {
+  const t = useT();
+  const [sid, setSid] = useState('');
+  const [mobile, setMobile] = useState('');
+  const [code, setCode] = useState('');
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = window.setInterval(() => setCountdown((c) => c - 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
+
+  async function send() {
+    const m = mobile.replace(/\D/g, '');
+    if (!/^1[3-9]\d{9}$/.test(m)) {
+      notify.warn(t('accounts.phoneInvalid'));
+      return;
+    }
+    setBusy(true);
+    try {
+      let s = sid;
+      if (!s) {
+        const r = await accountApi.loginStart();
+        s = r.sid;
+        setSid(s);
+      }
+      await accountApi.loginSend(s, m);
+      setSent(true);
+      setCountdown(60);
+    } catch (e) {
+      // 会话可能过期 → 清掉，下次点击自动重开
+      setSid('');
+      notify.err(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    const c = code.replace(/\D/g, '');
+    if (c.length !== 6) {
+      notify.warn(t('accounts.codeInvalid'));
+      return;
+    }
+    if (!sid) {
+      notify.warn(t('accounts.sessionExpired'));
+      setSent(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await accountApi.loginVerify(sid, c);
+      notify.ok(r.message || t('accounts.addOk', {name: r.account?.name || ''}),
+                r.check?.live_message);
+      onDone();
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] text-muted-foreground">{t('accounts.phoneHint')}</p>
+      <div className="space-y-1.5">
+        <Label>{t('accounts.mobile')}</Label>
+        <div className="flex gap-2">
+          <span className="inline-flex items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">+86</span>
+          <Input value={mobile} onChange={(e) => setMobile(e.target.value)}
+                 inputMode="numeric" maxLength={11} placeholder={t('accounts.mobilePh')}
+                 className="font-mono" disabled={sent} />
+        </div>
+      </div>
+      {sent && (
+        <div className="space-y-1.5">
+          <Label>{t('accounts.code')}</Label>
+          <div className="flex gap-2">
+            <Input value={code} onChange={(e) => setCode(e.target.value)}
+                   inputMode="numeric" maxLength={6} placeholder={t('accounts.codePh')}
+                   className="font-mono tracking-widest" />
+            <Button variant="outline" onClick={send} disabled={busy || countdown > 0} className="shrink-0">
+              {countdown > 0 ? `${countdown}s` : t('accounts.resend')}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">{t('accounts.codeHint')}</p>
+        </div>
+      )}
+      <Button onClick={sent ? verify : send} disabled={busy} className="self-end">
+        {busy ? t('common.submitting') : sent ? t('accounts.loginAndImport') : t('accounts.getCode')}
+      </Button>
+    </div>
+  );
+}
+
+/* ── 官方页面接力登录（cn / global 都支持）────────────────────────── */
+function OfficialLoginFlow({realm, onDone}: {realm: string; onDone: () => void}) {
+  const t = useT();
+  const [sid, setSid] = useState('');
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'init' | 'waiting' | 'done'>('init');
+
+  // 轮询官方登录是否完成（用户在另开的官方页面里自己登录）
+  useEffect(() => {
+    if (phase !== 'waiting' || !sid) return;
+    let stopped = false;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const r = await accountApi.officialPoll(sid, realm);
+        if (stopped) return;
+        if (r.done) {
+          setPhase('done');
+          notify.ok(r.message || t('accounts.addOk', {name: r.account?.name || ''}));
+          onDone();
+          return;
+        }
+      } catch {
+        // 会话失效等 → 停止轮询，提示重来
+        if (!stopped) {
+          setPhase('init');
+          notify.err(t('accounts.sessionExpired'));
+        }
+        return;
+      }
+      if (!stopped) timer = window.setTimeout(poll, 2500);
+    };
+    timer = window.setTimeout(poll, 2500);
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, [phase, sid, realm, onDone, t]);
+
+  async function start() {
+    setBusy(true);
+    try {
+      const r = await accountApi.officialStart(realm);
+      setSid(r.sid);
+      setUrl(r.auth_url);
+      setPhase('waiting');
+      window.open(r.auth_url, '_blank', 'noopener');
+    } catch (e) {
+      notify.err(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] text-muted-foreground">
+        {realm === 'global' ? t('accounts.officialHintGlobal') : t('accounts.officialHintCn')}
+      </p>
+      {phase === 'init' && (
+        <Button onClick={start} disabled={busy} className="self-end">
+          {busy ? t('common.submitting') : t('accounts.officialStart')}
+        </Button>
+      )}
+      {phase === 'waiting' && (
+        <>
+          <div className="flex items-center gap-2 rounded-md border bg-muted/50 p-3 text-xs">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <div className="flex flex-col">
+              <span>{t('accounts.officialWaiting')}</span>
+              {url && (
+                <a href={url} target="_blank" rel="noopener noreferrer"
+                   className="mt-1 break-all text-primary underline underline-offset-2">
+                  {t('accounts.officialReopen')}
+                </a>
+              )}
+            </div>
+          </div>
+          <Button variant="outline" onClick={start} disabled={busy} className="self-end">
+            {t('accounts.officialRestart')}
+          </Button>
+        </>
+      )}
+      {phase === 'done' && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+          {t('accounts.officialDone')}
+        </div>
+      )}
+    </div>
   );
 }
 

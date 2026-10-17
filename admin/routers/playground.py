@@ -48,6 +48,13 @@ class ChatIn(BaseModel):
     stream: bool = True
     max_tokens: int | None = None
     temperature: float | None = None
+    # 手动指定账号（可选）：按版本挑一个具体账号测试，不传则走号池状态机自动选。
+    # ⚠️ 指定账号仍要求该账号健康（active / 无冷却熔断）—— 测试不该绕过
+    # 健康判定（用死号测出来的结果没有参考价值），只是绕过「自动挑哪个」。
+    account_id: int | None = None
+    # 手动指定 API Key（可选）：把这次测试记到某把 Key 的账上（审计维度更准）。
+    # 不传时记 key_id=0（管理员直调口径，与既有行为一致）。
+    key_id: int | None = None
 
 
 @router.post("/chat")
@@ -82,9 +89,36 @@ async def playground_chat(
         out["reasoning_effort"] = body.reasoning_effort
 
     # 选号（同一状态机：粘性/健康/紧迫度/防撞号/模型级冷却/在途过滤）
+    #
+    # 手动指定账号（#4）：用户要能「按版本选一个具体账号/key」来测，
+    # 而不是每次都被自动分配。指定时仍走健康过滤（死号测出的结果没有
+    # 参考价值）；自动模式完全不变。
     sticky_key = f"playground:{request.client.host if request.client else ''}"
-    acc = _select_account(db, min_balance=1, model=model, sticky_key=sticky_key,
-                          require_realm=model_realm or "")
+    acc = None
+    if body.account_id:
+        from admin.models import Account
+        acc = (db.query(Account)
+               .filter(Account.id == int(body.account_id),
+                       Account.status == "active")
+               .first())
+        if acc is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"message": f"账号 #{body.account_id} 不存在或非活跃",
+                                   "type": "no_account"}})
+        # realm 校验：指定的账号必须与模型版本一致 ——
+        # 混用两版身份是真实的风控特征（见 client_profile 模块注释）。
+        acc_realm = (getattr(acc, "realm", "") or "").strip().lower()
+        want_realm = (model_realm or "").strip().lower()
+        if want_realm and acc_realm and acc_realm != want_realm:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message":
+                    f"该账号是 {acc_realm} 版，不能用来测 {want_realm} 版的模型",
+                                   "type": "realm_mismatch"}})
+    if acc is None:
+        acc = _select_account(db, min_balance=1, model=model, sticky_key=sticky_key,
+                              require_realm=model_realm or "")
     if not acc:
         return JSONResponse(
             status_code=503,
@@ -150,9 +184,10 @@ async def playground_chat(
                             yield chunk
                         full = "".join(collected)
                         usage = _parse_usage(full)
-                        # 记账（key_id=0 区分测试台；与 /v1 同一 usage_logs）
+                        # 记账（key_id：指定 Key 时记账到那把 Key，否则 0 = 管理员直调；
+                        # 与 /v1 同一 usage_logs 表）
                         _record_usage(
-                            0, acc.id, model,
+                            int(body.key_id or 0), acc.id, model,
                             usage.get("credits"), sess_i.updated_json(),
                             client_ip=client_ip, use_case="playground",
                             prompt_tokens=usage.get("prompt_tokens"),
@@ -185,7 +220,7 @@ async def playground_chat(
             POOL.release(uid)
             # 失败兜底记账（非 200/传输错且无 usage 时，记一条 error 行供审计）
             if err_kind and status >= 400:
-                _record_usage(0, acc.id, model, 0.0, sess_i.updated_json(),
+                _record_usage(int(body.key_id or 0), acc.id, model, 0.0, sess_i.updated_json(),
                               client_ip=client_ip, use_case="playground",
                               latency_ms=int((time.perf_counter() - started) * 1000),
                               error_kind=err_kind, requested_model=model)

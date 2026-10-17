@@ -737,6 +737,24 @@ def _record_usage(key_id: int, account_id: int, model: str, credits: float | Non
             # 没有前缀时退回 `model`，再退回账号自身 realm。
             estimated = False
             original_credits = credits
+            # 记账用的版本归属：与倍率查找同一套解析（requested_model 前缀 →
+            # 账号自身 realm）。写在 if 外面 —— 倍率估算只在缺 credits 时做，
+            # 但 realm 归属**每条日志都要记**（#5：同模型两版不能混计）。
+            billing_realm = "cn"
+            try:
+                _breq = str(requested_model or model or "").strip()
+                _br, _bb = realm_mod.resolve_model_prefix(_breq)
+                if _br:
+                    billing_realm = _br
+                else:
+                    _acc_row = (db.query(Account)
+                                .filter(Account.id == account_id).first())
+                    if _acc_row is not None:
+                        _ar = (getattr(_acc_row, "realm", "") or "").strip().lower()
+                        if _ar in ("cn", "global"):
+                            billing_realm = _ar
+            except Exception:      # noqa: BLE001
+                pass
             if credits is None and (total_tokens or completion_tokens):
                 req = str(requested_model or model or "").strip()
                 req_realm, req_bare = realm_mod.resolve_model_prefix(req)
@@ -794,6 +812,7 @@ def _record_usage(key_id: int, account_id: int, model: str, credits: float | Non
                 total_tokens=total_tokens, cached_tokens=cached_tokens,
                 client_ip=client_ip or "", use_case=use_case or "",
                 seq=seq, ttfb_ms=ttfb_ms, latency_ms=latency_ms, error_kind=error_kind or "",
+                realm=billing_realm,
             )
             db.add(log)
             db.commit()

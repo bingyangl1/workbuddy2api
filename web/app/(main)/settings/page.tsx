@@ -57,6 +57,16 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [form, setForm] = useState<Record<string, string>>({});
   const [headers, setHeaders] = useState<Record<string, string>>({});
+  // #8 新增自定义风控头的键名输入
+  const [newHeaderKey, setNewHeaderKey] = useState('');
+
+  /** 添加一个新头（键名规范化：去空白；重名不覆盖已有值）。 */
+  function addHeader() {
+    const k = newHeaderKey.trim();
+    if (!k) return;
+    setHeaders((h) => (k in h ? h : {...h, [k]: ''}));
+    setNewHeaderKey('');
+  }
   const [busy, setBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
 
@@ -258,12 +268,42 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-3">
             {Object.keys(headers).map((hk) => (
               <div key={hk} className="space-y-1">
-                <Label className="font-mono text-[11px]">{hk}</Label>
+                <div className="flex items-center gap-1">
+                  <Label className="font-mono text-[11px]">{hk}</Label>
+                  {/* 自定义头可删除（引擎的四个归属头 X-IDE-* / X-Product 不给删，
+                      它们是官方形态的一部分，删了反而暴露非官方特征） */}
+                  {!(hk.startsWith('X-IDE-') || hk === 'X-Product') && (
+                    <Button size="sm" variant="ghost" className="ml-auto h-5 px-1.5 text-[10px] text-red-500"
+                            title={t('settings.headerRemove')}
+                            onClick={() => setHeaders((h) => {
+                              const n = {...h};
+                              delete n[hk];
+                              return n;
+                            })}>
+                      ×
+                    </Button>
+                  )}
+                </div>
                 <Input value={headers[hk] || ''}
                        onChange={(e) => setHeaders((h) => ({...h, [hk]: e.target.value}))}
                        className="h-8 font-mono text-xs" />
               </div>
             ))}
+            {/* #8 新增自定义头：上游出新风控头时能立即跟上，
+                不用等发版。键名输入 + 添加按钮。 */}
+            <div className="flex items-center gap-2 border-t pt-3">
+              <Input value={newHeaderKey}
+                     onChange={(e) => setNewHeaderKey(e.target.value)}
+                     placeholder={t('settings.newHeaderKeyPh')}
+                     className="h-8 flex-1 font-mono text-xs"
+                     onKeyDown={(e) => {
+                       if (e.key === 'Enter' && newHeaderKey.trim()) addHeader();
+                     }} />
+              <Button size="sm" variant="outline" disabled={!newHeaderKey.trim()}
+                      onClick={addHeader}>
+                {t('settings.addHeader')}
+              </Button>
+            </div>
           </div>
         </section>
       </div>

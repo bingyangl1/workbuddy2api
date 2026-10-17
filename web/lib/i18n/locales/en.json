@@ -603,7 +603,31 @@
     "catTravelCredits": "Claimed +{n} credits",
     "cooldownClear": "Clear local cooldown",
     "cooldownCleared": "Cleared: {items}",
-    "cooldownNone": "No local cooldown/breaker/degrade to clear"
+    "cooldownNone": "No local cooldown/breaker/degrade to clear",
+    "exportOne": "Export this account (auth_json)",
+    "exportedOne": "Exported {name}",
+    "tabPhone": "Phone code",
+    "tabOfficial": "Official login",
+    "tabJson": "Paste auth JSON",
+    "phoneHint": "Enter a phone number to receive an SMS code. On success the server completes authorization automatically and adds the credential to the pool — no client install needed. CN only (+86).",
+    "mobile": "Phone number",
+    "mobilePh": "11-digit phone",
+    "phoneInvalid": "Enter a valid 11-digit phone number",
+    "code": "Code",
+    "codePh": "6-digit code",
+    "codeInvalid": "Enter the 6-digit code",
+    "codeHint": "Code sent, valid for 60 seconds",
+    "resend": "Resend",
+    "getCode": "Get code",
+    "loginAndImport": "Login & import",
+    "sessionExpired": "Login session expired, request a new code",
+    "officialHintCn": "Opens the official login page. Log in there with any method (QR / email / phone); this side auto-exchanges the credential.",
+    "officialHintGlobal": "Opens the global (workbuddy.ai) login page. The global edition has no SMS flow — use email/QR on the official page.",
+    "officialStart": "Start official login",
+    "officialWaiting": "Waiting for you to log in on the official page… (auto-detected)",
+    "officialReopen": "Reopen official login page",
+    "officialRestart": "Restart",
+    "officialDone": "Imported. You can close this dialog."
   },
   "keys": {
     "title": "API keys",
@@ -1107,7 +1131,14 @@
     "delete": "Delete",
     "deleteGroupTitle": "Delete group",
     "deleteGroupConfirm": "Delete group \"{name}\"? Its {n} bound keys will fall back to \"all models\".",
-    "groupDeleted": "Group deleted, {n} keys unbound"
+    "groupDeleted": "Group deleted, {n} keys unbound",
+    "realmTag": "{realm} · account #{id}",
+    "exportAccount": "Export this account",
+    "colDailyLimit": "Daily limit",
+    "sortByMultiplier": "Sort by multiplier",
+    "sortByModel": "Sort by model name",
+    "realmTag2": "{realm} account #{id}",
+    "syncedWithRealm": "Synced {realm} list (source account #{acc}): +{added} · ~{updated}"
   },
   "playground": {
     "title": "Chat Playground",
@@ -1122,7 +1153,9 @@
     "aborted": "Aborted",
     "usageTitle": "Cost",
     "credits": "{n} credits",
-    "creditsUnknown": "Credits — (not returned)"
+    "creditsUnknown": "Credits — (not returned)",
+    "accountLabel": "Test account",
+    "accountAuto": "Auto-select"
   },
   "effort": {
     "off": "Off",
@@ -1703,7 +1736,10 @@
     "detected": "Local client detected",
     "notDetected": "No local client",
     "sourceSaved": "Pinned saved values",
-    "sourceAuto": "Prefer live detection"
+    "sourceAuto": "Prefer live detection",
+    "newHeaderKeyPh": "New header name, e.g. X-New-Risk-Header",
+    "addHeader": "Add",
+    "headerRemove": "Remove this header"
   },
   "phrases": {
     "请求失败": "Request failed",
@@ -2328,7 +2364,9 @@
     "search": "Search sources",
     "searchPlaceholder": "Keyword (e.g. turing, growthEvent)",
     "searchBtn": "Search",
-    "noHits": "No matches"
+    "noHits": "No matches",
+    "notFound": "Not detected",
+    "useThisDir": "Fill into the input below"
   },
   "layout": {
     "title": "Layout",

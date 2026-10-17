@@ -579,7 +579,31 @@
     "catTravelCredits": "領獎 +{n} 積分",
     "cooldownClear": "解除本地冷卻",
     "cooldownCleared": "已解除：{items}",
-    "cooldownNone": "該帳號目前沒有本地冷卻/熔斷/降權，無需解除"
+    "cooldownNone": "該帳號目前沒有本地冷卻/熔斷/降權，無需解除",
+    "exportOne": "匯出此帳號（auth_json）",
+    "exportedOne": "已匯出 {name}",
+    "tabPhone": "手機驗證碼",
+    "tabOfficial": "官方登入",
+    "tabJson": "憑證貼上",
+    "phoneHint": "輸入手機號取得驗證碼，登入成功後系統自動完成授權並把憑證加入帳號池，無需安裝用戶端。僅支援國內版（+86）。",
+    "mobile": "手機號",
+    "mobilePh": "11 位手機號",
+    "phoneInvalid": "請輸入正確的 11 位手機號",
+    "code": "驗證碼",
+    "codePh": "6 位驗證碼",
+    "codeInvalid": "請輸入 6 位驗證碼",
+    "codeHint": "驗證碼已發送，60 秒內有效",
+    "resend": "重新獲取",
+    "getCode": "獲取驗證碼",
+    "loginAndImport": "登入並入池",
+    "sessionExpired": "登入會話已失效，請重新獲取驗證碼",
+    "officialHintCn": "點擊開始會開啟官方登入頁。你在那邊用任意方式完成登入，這邊自動換憑證入池。",
+    "officialHintGlobal": "點擊開始會開啟國際版（workbuddy.ai）登入頁。完成登入後這邊自動換憑證入池。",
+    "officialStart": "開始官方登入",
+    "officialWaiting": "等待你在官方頁面完成登入…（會自動檢測）",
+    "officialReopen": "重新開啟官方登入頁",
+    "officialRestart": "重新發起",
+    "officialDone": "已入庫，可以關閉對話框了"
   },
   "keys": {
     "title": "API 金鑰",
@@ -1083,7 +1107,14 @@
     "delete": "刪除",
     "deleteGroupTitle": "刪除分組",
     "deleteGroupConfirm": "確定刪除分組「{name}」嗎？綁定的 {n} 個金鑰將降級為「不限制模型」。",
-    "groupDeleted": "分組已刪除，{n} 個金鑰已解綁"
+    "groupDeleted": "分組已刪除，{n} 個金鑰已解綁",
+    "realmTag": "{realm} · 帳號 #{id}",
+    "exportAccount": "匯出此帳號",
+    "colDailyLimit": "每日限額",
+    "sortByMultiplier": "按倍率排序",
+    "sortByModel": "按模型名排序",
+    "realmTag2": "{realm} 帳號 #{id}",
+    "syncedWithRealm": "已同步 {realm} 清單（源帳號 #{acc}）：新增 {added} · 更新 {updated}"
   },
   "playground": {
     "title": "聊天測試台",
@@ -1098,7 +1129,9 @@
     "aborted": "已中斷",
     "usageTitle": "本次消耗",
     "credits": "{n} 積分",
-    "creditsUnknown": "積分 —（上游未返回）"
+    "creditsUnknown": "積分 —（上游未返回）",
+    "accountLabel": "測試帳號",
+    "accountAuto": "自動選號"
   },
   "effort": {
     "off": "關閉",
@@ -1679,7 +1712,10 @@
     "detected": "已偵測到本機用戶端",
     "notDetected": "未偵測到用戶端",
     "sourceSaved": "釘住已儲存值",
-    "sourceAuto": "優先現場偵測"
+    "sourceAuto": "優先現場偵測",
+    "newHeaderKeyPh": "新頭名稱，如 X-New-Risk-Header",
+    "addHeader": "新增",
+    "headerRemove": "刪除此頭"
   },
   "phrases": {
     "请求失败": "請求失敗",
@@ -2304,7 +2340,9 @@
     "search": "檢索源碼",
     "searchPlaceholder": "輸入關鍵字（如 turing、growthEvent）",
     "searchBtn": "檢索",
-    "noHits": "無符合結果"
+    "noHits": "無符合結果",
+    "notFound": "未偵測到",
+    "useThisDir": "填入到下方輸入框"
   },
   "layout": {
     "title": "介面佈局",

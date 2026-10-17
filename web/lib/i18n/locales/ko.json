@@ -579,7 +579,31 @@
     "catTravelCredits": "보상 +{n} 크레딧",
     "cooldownClear": "로컬 쿨다운 해제",
     "cooldownCleared": "해제됨: {items}",
-    "cooldownNone": "해제할 로컬 쿨다운/서킷브레이커/강등 상태가 없습니다"
+    "cooldownNone": "해제할 로컬 쿨다운/서킷브레이커/강등 상태가 없습니다",
+    "exportOne": "이 계정 내보내기",
+    "exportedOne": "{name} 내보냄",
+    "tabPhone": "SMS 코드",
+    "tabOfficial": "공식 로그인",
+    "tabJson": "자격 증명 붙여넣기",
+    "phoneHint": "전화번호를 입력해 SMS 코드를 받으세요. 성공 시 서버가 자동으로 인증을 완료합니다.",
+    "mobile": "전화번호",
+    "mobilePh": "11자리 번호",
+    "phoneInvalid": "올바른 11자리 번호를 입력하세요",
+    "code": "코드",
+    "codePh": "6자리 코드",
+    "codeInvalid": "6자리 코드를 입력하세요",
+    "codeHint": "코드가 전송되었습니다 (60초 유효)",
+    "resend": "재전송",
+    "getCode": "코드 받기",
+    "loginAndImport": "로그인 후 추가",
+    "sessionExpired": "세션이 만료되었습니다. 코드를 다시 받으세요",
+    "officialHintCn": "공식 로그인 페이지가 열립니다. 로그인하면 자동으로 자격 증명을 가져옵니다.",
+    "officialHintGlobal": "국제판(workbuddy.ai) 로그인 페이지가 열립니다.",
+    "officialStart": "공식 로그인 시작",
+    "officialWaiting": "공식 페이지에서 로그인 대기 중…",
+    "officialReopen": "공식 페이지 다시 열기",
+    "officialRestart": "다시 시작",
+    "officialDone": "추가되었습니다. 닫을 수 있습니다."
   },
   "keys": {
     "title": "API 키",
@@ -1083,7 +1107,14 @@
     "delete": "삭제",
     "deleteGroupTitle": "그룹 삭제",
     "deleteGroupConfirm": "그룹 \"{name}\"을(를) 삭제하시겠습니까? 바인딩된 키 {n}개는 \"모든 모델 허용\"으로 돌아갑니다.",
-    "groupDeleted": "그룹 삭제됨, 키 {n}개 바인딩 해제"
+    "groupDeleted": "그룹 삭제됨, 키 {n}개 바인딩 해제",
+    "realmTag": "{realm} · 계정 #{id}",
+    "exportAccount": "이 계정 내보내기",
+    "colDailyLimit": "일일 한도",
+    "sortByMultiplier": "배율로 정렬",
+    "sortByModel": "모델명으로 정렬",
+    "realmTag2": "{realm} 계정 #{id}",
+    "syncedWithRealm": "{realm} 목록 동기화됨(계정 #{acc}): +{added} · ~{updated}"
   },
   "playground": {
     "title": "채팅 테스트台",
@@ -1098,7 +1129,9 @@
     "aborted": "중단됨",
     "usageTitle": "이번 소모",
     "credits": "{n} 크레딧",
-    "creditsUnknown": "크레딧 —(미반환)"
+    "creditsUnknown": "크레딧 —(미반환)",
+    "accountLabel": "테스트 계정",
+    "accountAuto": "자동 선택"
   },
   "effort": {
     "off": "끔",
@@ -1679,7 +1712,10 @@
     "detected": "로컬 클라이언트 감지됨",
     "notDetected": "클라이언트 미감지",
     "sourceSaved": "저장값 고정",
-    "sourceAuto": "실시간 감지 우선"
+    "sourceAuto": "실시간 감지 우선",
+    "newHeaderKeyPh": "새 헤더 이름 (예: X-New-Risk-Header)",
+    "addHeader": "추가",
+    "headerRemove": "이 헤더 삭제"
   },
   "phrases": {
     "请求失败": "요청 실패",
@@ -2304,7 +2340,9 @@
     "search": "소스 검색",
     "searchPlaceholder": "키워드(예: turing, growthEvent)",
     "searchBtn": "검색",
-    "noHits": "일치 항목 없음"
+    "noHits": "일치 항목 없음",
+    "notFound": "감지되지 않음",
+    "useThisDir": "아래 입력란에 채우기"
   },
   "layout": {
     "title": "레이아웃",

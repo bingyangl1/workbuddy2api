@@ -169,11 +169,43 @@ export const accountApi = {
   update: (id: number, body: {name?: string; status?: 'active' | 'disabled'}) =>
     patch<{id: number; ok: boolean}>(`/api/accounts/${id}`, body),
   remove: (id: number) => del<{ok: boolean}>(`/api/accounts/${id}`),
+  /** 导出账号（auth_json 原文，可直接再导入）。
+   *  ids 传单个 id = 按账号导出；传多个 = 勾选导出；空 = 全部。
+   *  响应是文件流不是 JSON，用 responseType:'blob'。 */
+  export: (ids: number[], include_disabled = false) =>
+    http.post<Blob>('/api/accounts/export', {ids, include_disabled},
+                    {responseType: 'blob'})
+      .then((r) => r.data),
   refresh: (id: number) =>
     post<{id: number; balance_total: number | null; balance_remain: number | null}>(
       `/api/accounts/${id}/refresh`),
   creditDetails: (id: number, refresh = false) =>
     get<CreditDetails>(`/api/accounts/${id}/credit-details`, refresh ? {refresh: 1} : undefined),
+  /**
+   * 手机验证码登录（三步流：start → send → verify）。
+   *
+   * ⚠️ 短信链**只有国内版**（Keycloak/OneID 的页面结构只在 workbuddy.cn
+   * 实测过，上游接口没有国际版短信形态）。国际版请走 officialLogin。
+   */
+  loginStart: () => post<{sid: string; auth_url: string}>('/api/login/start'),
+  loginSend: (sid: string, mobile: string) =>
+    post<{ok: boolean; expires_in: number}>('/api/login/send', {sid, mobile}),
+  loginVerify: (sid: string, code: string) =>
+    post<{ok: boolean; message: string; uid: string;
+          account: {id: number; name: string}; check: {live_message?: string}}>(
+      '/api/login/verify', {sid, code}),
+  /**
+   * 官方页面接力登录（cn / global 都支持）。
+   *
+   * 用户在打开的官方页面里自己完成登录（扫码 / 邮箱密码 / 任何官方形态），
+   * 我们只轮询拿凭证。**国际版登录走这里** —— 上游没有国际版短信链。
+   */
+  officialStart: (realm: string) =>
+    post<{sid: string; auth_url: string; realm: string}>(
+      '/api/join/official/start', {realm}),
+  officialPoll: (sid: string, realm: string) =>
+    post<{done: boolean; message?: string; account?: {id: number; name: string}}>(
+      '/api/join/official/poll', {sid, realm}),
   /** 全池模型级限流台账（routers/accounts.py::model_limits）。 */
   modelLimits: () => get<{items: ModelLimitRow[]}>('/api/accounts/model-limits'),
   clearModelLimit: (id: number) =>

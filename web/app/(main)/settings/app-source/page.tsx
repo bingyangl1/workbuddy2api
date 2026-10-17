@@ -32,7 +32,16 @@ interface SourceStatus {
   unpacked?: boolean;
   astro?: string;
   files?: number;
+  /** #6 两版各自的安装目录（cn / global），后端 _status_payload.realms */
+  realms?: {cn?: RealmInstall; global?: RealmInstall; [k: string]: unknown};
   [k: string]: unknown;
+}
+
+interface RealmInstall {
+  install_dir?: string;
+  desktop_version?: string;
+  application_name?: string;
+  found?: boolean;
 }
 
 export default function AppSourcePage() {
@@ -125,6 +134,43 @@ export default function AppSourcePage() {
               )}
             </div>
           </section>
+
+          {/* #6 两版安装目录分别展示。
+              一台机器可能两个版本都装了（目录名不同：WorkBuddy / WorkBuddyAI），
+              主探测只报一个 —— 只看上面那个「已安装」会以为另一版没装。 */}
+          {st.realms && (
+            <section className="grid grid-cols-1 gap-3 rounded-xl border bg-card p-4 sm:grid-cols-2">
+              {(['cn', 'global'] as const).map((r) => {
+                const info = st.realms?.[r];
+                return (
+                  <div key={r} className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold">
+                        {r === 'cn' ? t('realm.cn') : t('realm.global')}
+                      </span>
+                      <Badge variant={info?.found ? 'default' : 'outline'} className="text-[10px]">
+                        {info?.found ? t('appSource.yes') : t('appSource.no')}
+                      </Badge>
+                    </div>
+                    <span className="break-all font-mono text-xs text-muted-foreground">
+                      {info?.install_dir || t('appSource.notFound')}
+                    </span>
+                    {info?.found && info.desktop_version && (
+                      <span className="text-[11px] text-muted-foreground">
+                        v{info.desktop_version} · {info.application_name}
+                      </span>
+                    )}
+                    {/* 点击填入下面的手动输入框（用于该版本的自定义目录） */}
+                    <Button size="sm" variant="ghost" className="h-7 self-start text-[11px]"
+                            disabled={!info?.install_dir}
+                            onClick={() => setInstallDir(String(info?.install_dir || ''))}>
+                      {t('appSource.useThisDir')}
+                    </Button>
+                  </div>
+                );
+              })}
+            </section>
+          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <section className="flex flex-col gap-3 rounded-xl border bg-card p-4">

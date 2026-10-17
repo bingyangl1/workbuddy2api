@@ -223,6 +223,10 @@ class UsageLog(Base):
     """
 
     __tablename__ = "usage_logs"
+    # 版本归属（cn / global）—— 同名模型两版计费不同，日志不区分版本
+    # 就会把两版混成一条统计（#5：用户实测反馈过这个问题）。
+    # 由 _record_usage 按「requested_model 前缀 → 账号自身 realm」解析后写入。
+    realm = Column(String(16), default="cn", nullable=False)
     # 索引说明（都是为「使用记录 / 日志」的筛选与排序服务的）：
     #   ix_usage_logs_created_id  —— 覆盖「按时间倒序分页」这条**永不消失**的主查询。
     #       原来是 PRIMARY(id) 倒序扫：日志一多，`ORDER BY id DESC LIMIT 20`

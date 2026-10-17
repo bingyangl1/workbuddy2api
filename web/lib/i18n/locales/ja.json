@@ -579,7 +579,31 @@
     "catTravelCredits": "報酬 +{n} クレジット",
     "cooldownClear": "ローカル冷却を解除",
     "cooldownCleared": "解除しました：{items}",
-    "cooldownNone": "解除すべきローカル冷却/サーキットブレーカー/降格はありません"
+    "cooldownNone": "解除すべきローカル冷却/サーキットブレーカー/降格はありません",
+    "exportOne": "このアカウントをエクスポート",
+    "exportedOne": "{name} をエクスポートしました",
+    "tabPhone": "SMS コード",
+    "tabOfficial": "公式ログイン",
+    "tabJson": "認証情報貼付",
+    "phoneHint": "携帯番号を入力して SMS コードを受け取る。成功するとサーバーが自動で認可を完了し、資格情報をプールに追加します。",
+    "mobile": "携帯番号",
+    "mobilePh": "11 桁の番号",
+    "phoneInvalid": "正しい 11 桁の番号を入力してください",
+    "code": "コード",
+    "codePh": "6 桁コード",
+    "codeInvalid": "6 桁のコードを入力してください",
+    "codeHint": "コード送信済み（60 秒有効）",
+    "resend": "再送信",
+    "getCode": "コード取得",
+    "loginAndImport": "ログインして追加",
+    "sessionExpired": "セッションが失効しました。コードを再取得してください",
+    "officialHintCn": "公式ログインページを開きます。そちらでログインすると自動的に資格情報を取得します。",
+    "officialHintGlobal": "国際版（workbuddy.ai）のログインページを開きます。",
+    "officialStart": "公式ログイン開始",
+    "officialWaiting": "公式ページでのログインを待っています…",
+    "officialReopen": "公式ページを再度開く",
+    "officialRestart": "やり直す",
+    "officialDone": "追加されました。閉じられます。"
   },
   "keys": {
     "title": "API キー",
@@ -1083,7 +1107,14 @@
     "delete": "削除",
     "deleteGroupTitle": "グループ削除",
     "deleteGroupConfirm": "グループ「{name}」を削除しますか？紐付く {n} 個のキーは「全モデル許可」に戻ります。",
-    "groupDeleted": "グループを削除、{n} 個のキーを解除"
+    "groupDeleted": "グループを削除、{n} 個のキーを解除",
+    "realmTag": "{realm} · アカウント #{id}",
+    "exportAccount": "このアカウントをエクスポート",
+    "colDailyLimit": "1日の上限",
+    "sortByMultiplier": "倍率で並べ替え",
+    "sortByModel": "モデル名で並べ替え",
+    "realmTag2": "{realm} アカウント #{id}",
+    "syncedWithRealm": "{realm} リストを同期しました（ソース #{acc}）：追加 {added} · 更新 {updated}"
   },
   "playground": {
     "title": "チャットテスト台",
@@ -1098,7 +1129,9 @@
     "aborted": "中断しました",
     "usageTitle": "今回の消費",
     "credits": "{n} クレジット",
-    "creditsUnknown": "クレジット —（未返却）"
+    "creditsUnknown": "クレジット —（未返却）",
+    "accountLabel": "テストアカウント",
+    "accountAuto": "自動選択"
   },
   "effort": {
     "off": "オフ",
@@ -1679,7 +1712,10 @@
     "detected": "ローカルクライアントを検出",
     "notDetected": "クライアント未検出",
     "sourceSaved": "保存値を固定",
-    "sourceAuto": "ライブ検出を優先"
+    "sourceAuto": "ライブ検出を優先",
+    "newHeaderKeyPh": "新しいヘッダー名（例: X-New-Risk-Header）",
+    "addHeader": "追加",
+    "headerRemove": "このヘッダーを削除"
   },
   "phrases": {
     "请求失败": "リクエストに失敗しました",
@@ -2304,7 +2340,9 @@
     "search": "ソース検索",
     "searchPlaceholder": "キーワード（例: turing, growthEvent）",
     "searchBtn": "検索",
-    "noHits": "一致なし"
+    "noHits": "一致なし",
+    "notFound": "未検出",
+    "useThisDir": "下の入力欄に入力"
   },
   "layout": {
     "title": "レイアウト",

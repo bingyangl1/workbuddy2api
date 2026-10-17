@@ -579,7 +579,31 @@
     "catTravelCredits": "领奖 +{n} 积分",
     "cooldownClear": "解除本地冷却",
     "cooldownCleared": "已解除：{items}",
-    "cooldownNone": "该账号当前没有本地冷却/熔断/降权，无需解除"
+    "cooldownNone": "该账号当前没有本地冷却/熔断/降权，无需解除",
+    "exportOne": "导出此账号（auth_json）",
+    "exportedOne": "已导出 {name}",
+    "tabPhone": "手机验证码",
+    "tabOfficial": "官方登录",
+    "tabJson": "凭证粘贴",
+    "phoneHint": "输入手机号获取验证码，登录成功后系统自动完成授权并把凭证加入账号池，无需安装客户端。仅支持国内版（+86）。",
+    "mobile": "手机号",
+    "mobilePh": "11 位手机号",
+    "phoneInvalid": "请输入正确的 11 位手机号",
+    "code": "验证码",
+    "codePh": "6 位验证码",
+    "codeInvalid": "请输入 6 位验证码",
+    "codeHint": "验证码已发送，60 秒内有效",
+    "resend": "重新获取",
+    "getCode": "获取验证码",
+    "loginAndImport": "登录并入池",
+    "sessionExpired": "登录会话已失效，请重新获取验证码",
+    "officialHintCn": "点击开始会打开官方登录页。你在那边用任意方式（扫码 / 邮箱 / 手机）完成登录，这边自动换凭证入池。",
+    "officialHintGlobal": "点击开始会打开国际版（workbuddy.ai）登录页。完成登录后这边自动换凭证入池。国际版没有短信链，请用官方页面的邮箱/扫码登录。",
+    "officialStart": "开始官方登录",
+    "officialWaiting": "等待你在官方页面完成登录…（会自动检测）",
+    "officialReopen": "重新打开官方登录页",
+    "officialRestart": "重新发起",
+    "officialDone": "已入库，可以关闭对话框了"
   },
   "keys": {
     "title": "API 密钥",
@@ -1083,7 +1107,14 @@
     "delete": "删除",
     "deleteGroupTitle": "删除分组",
     "deleteGroupConfirm": "确定删除分组「{name}」吗？绑定的 {n} 个密钥将降级为「不限制模型」。",
-    "groupDeleted": "分组已删除，{n} 个密钥已解绑"
+    "groupDeleted": "分组已删除，{n} 个密钥已解绑",
+    "realmTag": "{realm} · 账号 #{id}",
+    "exportAccount": "导出此账号",
+    "colDailyLimit": "每日限额",
+    "sortByMultiplier": "按倍率排序",
+    "sortByModel": "按模型名排序",
+    "realmTag2": "{realm} 账号 #{id}",
+    "syncedWithRealm": "已同步 {realm} 清单（源账号 #{acc}）：新增 {added} · 更新 {updated}"
   },
   "playground": {
     "title": "聊天测试台",
@@ -1098,7 +1129,9 @@
     "aborted": "已中断",
     "usageTitle": "本次消耗",
     "credits": "{n} 积分",
-    "creditsUnknown": "积分 —（上游未返回）"
+    "creditsUnknown": "积分 —（上游未返回）",
+    "accountLabel": "测试账号",
+    "accountAuto": "自动选号"
   },
   "effort": {
     "off": "关闭",
@@ -1679,7 +1712,10 @@
     "detected": "已探测到本机客户端",
     "notDetected": "未探测到客户端",
     "sourceSaved": "钉住已保存值",
-    "sourceAuto": "优先现场探测"
+    "sourceAuto": "优先现场探测",
+    "newHeaderKeyPh": "新头名称，如 X-New-Risk-Header",
+    "addHeader": "添加",
+    "headerRemove": "删除此头"
   },
   "redPacket": {
     "title": "红包",
@@ -2095,7 +2131,9 @@
     "search": "检索源码",
     "searchPlaceholder": "输入关键字（如 turing、growthEvent）",
     "searchBtn": "检索",
-    "noHits": "无匹配结果"
+    "noHits": "无匹配结果",
+    "notFound": "未检测到",
+    "useThisDir": "填入到下方输入框"
   },
   "layout": {
     "title": "界面布局",
