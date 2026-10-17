@@ -455,7 +455,8 @@ def run_growth_tasks() -> dict:
             # 没有这个上限时，xx 个账号最坏能占住调度线程一个多小时，
             # 期间整点刷新余额 / 签到 / token 保活全部停摆
             # （表现为「定时任务卡住了」）。超出预算的账号如实记录、留待下次。
-            soft_budget=growth_router._SCHEDULE_SOFT_BUDGET)
+            soft_budget=growth_router._SCHEDULE_SOFT_BUDGET,
+            source="schedule")
     except Exception as e:
         return {"task": "run_growth_tasks", "ok": False, "error": str(e)}
     finally:

@@ -8,6 +8,7 @@
   可行的任务发包，其余标记为需人工，避免盲目请求污染上游日志。
 * **串行 + 限速**：逐个账号、逐个任务执行，中间 sleep，避免触发风控。
 """
+import logging
 import time
 from datetime import datetime
 
@@ -15,11 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from admin import backend, growth_plans, jobrunner
+from admin import backend, growth_lease, growth_plans, jobrunner
 from admin.config import settings
 from admin.db import SessionLocal, get_db
-from admin.models import Account
+from admin.models import Account, GrowthRunRecord
 from admin.security import require_admin
+
+log = logging.getLogger("admin.routers.growth")
 
 # ⚠️ 必须整组挂 require_admin（安全审计「严重」项）。
 # 历史实现的这个 router **一个鉴权依赖都没有**，于是：
@@ -332,10 +335,50 @@ def _reload_after_gate(session, before: list) -> list:
         return before
 
 
+def _record_run(db: Session, account_id: int, acc_log: dict, *,
+                source: str = "", task_code: str = "") -> None:
+    """把一次执行结果写进审计表（`growth_run_records`）。
+
+    为什么在 `run_accounts` 内部写而不是让调用方写：
+    三条执行路径（同步 / 异步 / 定时）都经过这里，放在这一处才能
+    **保证不漏**。调用方各写一份的话，将来新增入口很容易忘。
+
+    **失败不影响主流程**：审计是旁路，它挂了不能让任务本身失败 ——
+    这与项目里 `admin/audit.py` 的旁路容错是同一个原则。
+    """
+    try:
+        tasks = acc_log.get("tasks") or []
+        ok_n = sum(1 for t in tasks if t.get("ok") and not t.get("skipped"))
+        skipped_n = sum(1 for t in tasks if t.get("skipped"))
+        reason = ""
+        if not acc_log.get("ok"):
+            reason = str(acc_log.get("msg") or "")
+        elif skipped_n and not ok_n:
+            reason = "全部跳过"
+        db.add(GrowthRunRecord(
+            account_id=int(account_id),
+            source=(source or "")[:24],
+            task_code=(task_code or "")[:64],
+            ok=int(bool(acc_log.get("ok"))),
+            skipped=int(bool(acc_log.get("skipped")) or
+                        (bool(tasks) and not ok_n)),
+            credit=int(acc_log.get("credit") or acc_log.get("total_credit") or 0),
+            energy=int(acc_log.get("energy") or acc_log.get("total_energy") or 0),
+            reason=reason[:500],
+        ))
+        db.commit()
+    except Exception as e:      # noqa: BLE001  审计是旁路，绝不阻断主流程
+        log.warning("写成长执行审计失败 account=%s: %s", account_id, e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def run_accounts(account_ids: list[int], task_codes: list[str] | None,
                  db: Session, on_done=None, on_beat=None,
                  soft_budget: float | None = None,
-                 on_task=None) -> dict:
+                 on_task=None, source: str = "") -> dict:
     """对一批账号执行「自动参与 + 触发完成 + 领取」。供接口与定时任务共用。
 
     这里沉淀了串行执行与节流逻辑，定时任务必须复用本函数，
@@ -395,6 +438,27 @@ def run_accounts(account_ids: list[int], task_codes: list[str] | None,
         if not acc:
             item = {"account_id": aid, "ok": False, "msg": "账号不存在"}
             out.append(item)
+            if on_done:
+                on_done(item)
+            continue
+
+        # ── 账号级执行租约（跨进程互斥）─────────────────────────────
+        #
+        # 为什么必需：成长任务有三条执行路径 —— 同步 `/run`、异步
+        # `/run-async`、定时 `run_growth_tasks`。它们**都会走到这里**，
+        # 但彼此之间原本没有互斥。用户手动点一次、正好定时也触发，
+        # 同一账号同一任务就会发两遍请求 —— 这正是「多遍跑会检测」的场景。
+        #
+        # `/run-async` 那道 `jobrunner.RUNNER.get(JOB_KEY)` 是进程内内存状态，
+        # 挡不住多 worker、挡不住重启、也挡不住同步 `/run` 和定时任务。
+        #
+        # 抢不到租约不是错误：说明这个号正被别的入口跑，如实标注后跳过即可。
+        lease_owner = growth_lease.acquire(db, aid)
+        if lease_owner is None:
+            item = {"account_id": aid, "ok": False, "skipped": True,
+                    "msg": "该账号正被另一个任务执行中，本次跳过（避免重复请求）"}
+            out.append(item)
+            _record_run(db, aid, item, source=source, task_code="")
             if on_done:
                 on_done(item)
             continue
@@ -721,7 +785,13 @@ def run_accounts(account_ids: list[int], task_codes: list[str] | None,
                     acc_log["balance_error"] = str(e)[:120]
         except Exception as e:
             acc_log.update({"ok": False, "msg": str(e)})
+        finally:
+            # **必须释放**：否则这个号会被锁到 TTL 到期（默认 600 秒），
+            # 期间用户再点一律「正被另一个任务执行中」，看起来像坏了。
+            # 放在 finally 而不是正常路径末尾，是因为任务可能抛异常。
+            growth_lease.release(db, aid, lease_owner)
         out.append(acc_log)
+        _record_run(db, aid, acc_log, source=source, task_code="")
         # 每跑完一个账号就上报进度。之前只在「账号不存在」分支调用，
         # 正常路径从不回调，前端因此一直停在 0/N，直到全部跑完才跳到 N/N。
         if on_done:
@@ -831,7 +901,7 @@ def growth_run(payload: RunIn, db: Session = Depends(get_db)):
     """
     ids = _resolve_ids(payload.account_ids or None)
     return run_accounts(ids, payload.task_codes, db,
-                        soft_budget=_SYNC_SOFT_BUDGET)
+                        soft_budget=_SYNC_SOFT_BUDGET, source="sync")
 
 
 #: 后台任务 key：同 key 同时只允许一个在跑
@@ -902,7 +972,7 @@ def growth_run_async(payload: RunIn):
             job.set_phase("执行中")
             res = run_accounts(ids, tasks, db, on_done=job.add_item,
                                on_beat=job.beat,
-                               on_task=job.task_beat)
+                               on_task=job.task_beat, source="async")
         finally:
             db.close()
         results = res.get("results") or []
@@ -1008,3 +1078,42 @@ def growth_plans_view():
             for p in growth_plans.TASK_PLANS.values()
         ],
     }
+
+
+@router.get("/records")
+def growth_records(account_id: int = 0, limit: int = 50,
+                   db: Session = Depends(get_db)):
+    """成长任务的**执行审计**（最近 N 次）。
+
+    为什么需要：三条执行路径（同步 / 异步 / 定时）跑完只把结果回给当次
+    调用方，面板一刷新就没了。出问题时答不上「这个号昨天到底做没做」
+    「这 500 积分是哪次跑出来的」「定时和我手动点的是不是重复跑了」。
+
+    `account_id=0` 表示查全部账号（默认）。
+    """
+    limit = max(1, min(int(limit or 50), 500))
+    q = db.query(GrowthRunRecord)
+    if account_id:
+        q = q.filter(GrowthRunRecord.account_id == account_id)
+    rows = (q.order_by(GrowthRunRecord.created_at.desc(),
+                       GrowthRunRecord.id.desc())
+            .limit(limit).all())
+    return {
+        "records": [
+            {"id": r.id, "account_id": r.account_id, "source": r.source,
+             "task_code": r.task_code, "ok": bool(r.ok),
+             "skipped": bool(r.skipped), "credit": int(r.credit or 0),
+             "energy": int(r.energy or 0), "reason": r.reason,
+             "created_at": r.created_at.isoformat(timespec="seconds")
+             if r.created_at else None}
+            for r in rows
+        ],
+    }
+
+
+@router.get("/lease/{account_id}")
+def growth_lease_view(account_id: int, db: Session = Depends(get_db)):
+    """查该账号当前是否被某个执行占用（诊断「正被另一个任务执行中」）。"""
+    return {"account_id": account_id,
+            "locked": growth_lease.is_locked(db, account_id),
+            "key": growth_lease.lease_key(account_id)}

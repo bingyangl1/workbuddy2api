@@ -453,3 +453,56 @@ class BenefitClaim(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow,
                         onupdate=datetime.utcnow)
+
+
+class GrowthRunRecord(Base):
+    """成长任务**单次执行**的审计记录（一次执行一条）。
+
+    ## 为什么需要
+
+    成长任务分散在三条路径上跑（同步 `/run`、异步 `/run-async`、定时
+    `run_growth_tasks`），执行完结果只回给当次调用方 —— 面板刷新后就没了。
+
+    出问题时的典型疑问全都答不上来：
+
+      * 「这个号的 chat_5 昨天到底做了没有？」
+      * 「这 500 积分是哪次跑出来的？」
+      * 「定时任务和我手动点的，是不是重复跑了？」
+
+    所以每次**真实执行**（不加锁跳过的不算）留一条记录。
+
+    ## 为什么不做成「每账号每任务一行」
+
+    那样会丢历史（上周做了什么查不到），而且要处理「同一任务一天跑多次」
+    的去重语义 —— 记录本身就不该有去重需求，它记录的是**事实**。
+
+    ## 与 `GrowthPlanRecord`（上游）的关系
+
+    上游对应的表叫 `growth_plan_records`，字段语义接近但那是给
+    「逐账号巡检」用的。我们的执行模型不同（任务策略表 + 批量），
+    所以字段也不同：这里有 `task_code`（具体任务）、`skipped`（是否跳过），
+    上游只有笼统的 `action`。
+    """
+
+    __tablename__ = "growth_run_records"
+    __table_args__ = (
+        # 按账号+时间查「最近一次」是最高频的查询
+        Index("ix_growth_run_records_account_time", "account_id", "created_at"),
+        Index("ix_growth_run_records_created", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, nullable=False)
+    #: 执行来源：sync / async / schedule / manual
+    source = Column(String(24), default="")
+    #: 具体任务码（如 chat_5 / skill_1）；批量汇总时为空
+    task_code = Column(String(64), default="")
+    #: 0/1。`ok=0` 且 `skipped=1` 表示「按规则跳过」，不是失败
+    ok = Column(Integer, default=0)
+    skipped = Column(Integer, default=0)
+    #: 本次获得的积分 / 体力
+    credit = Column(Integer, default=0)
+    energy = Column(Integer, default=0)
+    #: 跳过或失败的原因（成功时为空）
+    reason = Column(String(500), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
