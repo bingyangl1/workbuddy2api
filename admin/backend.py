@@ -303,10 +303,18 @@ class AccountSession:
         return result
 
     def fetch_model_busy(self, models: list[str]) -> dict:
-        """Official desktop endpoint: at most 50 models, five-second timeout."""
+        """Official desktop endpoint: at most 50 models, five-second timeout.
+
+        头必须与端点**同一 realm**：`_chat_base()` 已按账号 realm 取，
+        这里若用不分 realm 的 `risk_headers()`，国际版请求会出现
+        「端点 workbuddy.ai、X-IDE-Name=WorkBuddy」的自相矛盾组合 ——
+        比缺头更容易被判成伪造客户端。
+        """
         with httpx.Client(timeout=5) as client:
-            response = client.post(f"{self._chat_base()}/v2/chat/busy", json={"models": models},
-                                   headers=self.get_headers(cprofile.risk_headers()))
+            response = client.post(f"{self._chat_base()}/v2/chat/busy",
+                                   json={"models": models},
+                                   headers=self.get_headers(
+                                       cprofile.risk_headers(realm=self._realm)))
         response.raise_for_status()
         return response.json()
 

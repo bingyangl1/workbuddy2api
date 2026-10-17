@@ -142,8 +142,16 @@ class Settings:
     UPSTREAM_CLIENT_HEADER = os.getenv("ADMIN_UPSTREAM_CLIENT_HEADER", "")
 
     # 上游请求用量「client」列显示的产品名。
-    # 腾讯 CodeBuddy/WorkBuddy 后端通过 X-IDE-Name 头识别客户端，默认 "WorkBuddy"。
-    UPSTREAM_CLIENT_NAME = os.getenv("ADMIN_UPSTREAM_CLIENT_NAME", "WorkBuddy")
+    # 腾讯 CodeBuddy/WorkBuddy 后端通过 X-IDE-Name 头识别客户端。
+    #
+    # **默认留空 = 按账号 realm 自动取值**（正确做法）：
+    #     cn     → `WorkBuddy`
+    #     global → `workbuddy-ai`
+    #
+    # 曾经默认 `"WorkBuddy"` 会让**国际版账号也自报 WorkBuddy** —— 与同一请求的
+    # UA（`workbuddy-ai/5.8.4`）自相矛盾，是最容易被判成伪造客户端的形态。
+    # 只在「确实要强制统一成某个名字」时才显式设置（例如接非官方上游）。
+    UPSTREAM_CLIENT_NAME = os.getenv("ADMIN_UPSTREAM_CLIENT_NAME", "")
 
     # 账号选择策略。
     #

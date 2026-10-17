@@ -229,15 +229,21 @@ def find_auth_file() -> Path | None:
 # Auth 凭据管理（读 + 自动刷新 + 回写）
 # ---------------------------------------------------------------------------
 
-def _get_turing_device_token() -> str | None:
+def _get_turing_device_token(realm: str = "") -> str | None:
     """延迟取本机设备风控 Token；失败返回 None（不影响主流程）。
+
+    `realm` 决定用哪一版客户端算指纹 —— 两版是独立安装（不同 exe / SDK /
+    不同 channelId 109144 vs 400111），实测算出的 token 长度与内容都不同
+    （CN 1046 / Global 982 字符）。两版共用一份会让国际版请求带着
+    「国内版设备指纹」，与 UA/风控头指向的版本矛盾 —— 比缺头更易被判成伪造。
 
     放在模块级做懒加载：converter.py 既可作为 admin 的子模块被挂载，也可独立
     `python converter.py` 运行。admin 包不可用时（极少数情况）直接降级为不带该头。
     """
     try:
         from admin.turing_token import get_device_token
-        return get_device_token()
+        r = (realm or "").strip().lower()
+        return get_device_token(realm=r) if r else get_device_token()
     except Exception:
         return None
 
@@ -361,13 +367,26 @@ class CredentialManager:
 
     def _build_headers_from(self, auth: dict, account: dict) -> dict:
         domain = auth.get("domain") or DEFAULT_DOMAIN
-        # UA 品牌段随 realm：CN WorkBuddy / Global WorkBuddy AI（照 Go headers.go）
+        # UA 品牌段随 realm：CN WorkBuddy / Global workbuddy-ai（客户端实测）
         ua = client_user_agent()
+        risk: dict = {}
         try:
             from admin import realm as realm_mod
             ua = realm_mod.chat_ua(self.realm)
         except Exception:  # noqa: BLE001
             pass
+        # 4 个「用量归属 / 风控」头也必须按 realm 取。
+        #
+        # 为什么必须在这里（而不是只靠 proxy 的 extra）：本函数是**所有**出站
+        # 请求的基础头 —— 包括 token 刷新、模型列表、余额、签到等等。
+        # 少设这几个头时，那些请求在用量统计里「client 列为空」= 明显的网关特征；
+        # 而**设成错版本的值**更糟：国际版请求带着 `X-IDE-Name=WorkBuddy` /
+        # `X-IDE-Version=5.8.3`，与 UA 的 `workbuddy-ai/5.8.4` 自相矛盾。
+        try:
+            from admin import client_profile as _cp
+            risk = _cp.risk_headers(realm=self.realm) or {}
+        except Exception:  # noqa: BLE001
+            risk = {}
         h = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -378,9 +397,18 @@ class CredentialManager:
             "X-Domain": domain,
             "User-Agent": ua,
         }
+        # 只并入「协议头」性质的几项；Accept-Language / X-Requested-With 等
+        # 也在 risk_headers 里，一并带上与官方客户端一致。
+        for k, v in risk.items():
+            if k == "User-Agent":
+                continue      # UA 已按 realm 单独算过，别被档案里的旧值覆盖
+            h.setdefault(k, v)
         # 风控设备头：与桌面端 Turing Shield 一致，缺失会被上游识别为异常客户端。
         # 取不到（桌面端未安装 / SDK 不支持）时优雅降级为不带该头，不影响主流程。
-        tok = _get_turing_device_token()
+        #
+        # **必须按 realm 取**：两版客户端独立安装、独立 channelId，算出的指纹
+        # 完全不同（实测 CN 1046 / Global 982 字符）。
+        tok = _get_turing_device_token(self.realm)
         if tok:
             h["X-Device-Token"] = tok
         return h

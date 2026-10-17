@@ -493,11 +493,34 @@ def _upstream_extra_headers(request: Request, purpose: str = "conversation",
     ip = _client_ip(request)
     # 归属头 / 风控闸门头 / 版本号统一来自「客户端参数档案」
     # （后台可配置、可同步到线上，见 admin/client_profile.py）。
-    # 这里用 risk_headers() 一次取全，避免「UA 报 A、X-IDE-Version 报 B」的错位。
+    #
+    # **必须按账号 realm 取**（真缺陷，本函数已接收 account 参数却没用它）：
+    # 两版客户端的这组头取值完全不同 ——
+    #
+    #     cn     X-IDE-Name=WorkBuddy      X-IDE-Type=WorkBuddy
+    #            X-IDE-Version=5.8.3      X-Product=SaaS
+    #     global X-IDE-Name=workbuddy-ai   X-IDE-Type=workbuddy-ai
+    #            X-IDE-Version=5.8.4      X-Product=SaaS
+    #
+    # 原来无条件取 cn 的那份 → 国际版账号出站时 **UA 是 workbuddy-ai/5.8.4、
+    # X-IDE-Name 却是 WorkBuddy / 5.8.3**：同一请求内身份自相矛盾，
+    # 这是最容易被判成「伪造客户端」的形态（比缺头更糟）。
+    acc_realm = ""
+    if account is not None:
+        acc_realm = (getattr(account, "realm", "") or "").strip().lower()
+        if not acc_realm:
+            # 存量行 realm 可能为空：按 auth.domain 推断（与 realm_of 同口径）
+            try:
+                acc_realm = realm_mod.realm_of(
+                    json.loads(account.auth_json or "{}"))
+            except Exception:
+                acc_realm = ""
     h: dict[str, str] = {
         "X-Agent-Purpose": purpose or "conversation",
     }
-    h.update(cprofile.risk_headers())
+    # 一次取全，避免「UA 报 A、X-IDE-Version 报 B」的错位
+    h.update(cprofile.risk_headers(realm=acc_realm) if acc_realm
+             else cprofile.risk_headers())
     # 档案里的 ide_name 允许被 ADMIN_UPSTREAM_CLIENT_NAME 覆盖（历史行为保持一致）
     override = settings.UPSTREAM_CLIENT_NAME.strip()
     if override:

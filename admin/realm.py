@@ -271,21 +271,47 @@ def accept_language(realm: Realm) -> str:
 
 # ── 客户端身份头（骨架；backend.py 改造时全量接线）──────────────
 
-def client_version() -> str:
-    """出站 UA 的客户端版本段——复用本项目已有的 wb_install 探测，不重复实现。"""
+def client_version(realm: str = "") -> str:
+    """出站 UA 的客户端版本段 —— 复用 `wb_install` 的探测，不重复实现。
+
+    `realm` 必须传：两版版本号不同（cn 5.8.3 / global 5.8.4）。
+    不传时走「候选顺序里第一个命中的」那版（历史行为）。
+
+    **为什么这个参数很关键**：`chat_ua()` 在 `client_profile` 取不到值时会用
+    本函数拼兜底 UA。若这里恒用 cn 的版本，兜底路径就会产出
+    `workbuddy-ai/5.8.3`（品牌段对、版本段错）—— 与主路径修好的那个
+    风控特征一模一样，只是换了一条触发路径。
+    """
+    r = (realm or "").strip().lower()
     try:
         from wb_install import WB
-        return WB.desktop_version()
+        return WB.desktop_version(realm=r) if r else WB.desktop_version()
     except Exception:  # noqa: BLE001
-        return "5.5.6"
+        # 兜底也按 realm：宁可报「已知的官方值」也不要报错的版本号
+        try:
+            from wb_install import REALM_FALLBACKS
+            fb = (REALM_FALLBACKS.get(r) or {}).get("desktop_version")
+            if fb:
+                return str(fb)
+        except Exception:
+            pass
+        return "5.8.3" if r in ("", "cn") else "5.8.4"
 
 
-def cli_version() -> str:
+def cli_version(realm: str = "") -> str:
+    r = (realm or "").strip().lower()
     try:
         from wb_install import WB
-        return WB.cli_version()
+        return WB.cli_version(realm=r) if r else WB.cli_version()
     except Exception:  # noqa: BLE001
-        return "2.137.1"
+        try:
+            from wb_install import REALM_FALLBACKS
+            fb = (REALM_FALLBACKS.get(r) or {}).get("cli_version")
+            if fb:
+                return str(fb)
+        except Exception:
+            pass
+        return "2.161.0"
 
 
 def ua_brand(realm: Realm) -> str:
@@ -333,9 +359,9 @@ def chat_ua(realm: Realm) -> str:
             return ua
     except Exception:  # noqa: BLE001 探测不可用时回落到静态形状
         pass
-    ver = client_version()
+    ver = client_version(realm)
     brand = ua_brand(realm)
-    return f"{brand}/{ver} {brand}/{ver} CLI/{cli_version()}"
+    return f"{brand}/{ver} {brand}/{ver} CLI/{cli_version(realm)}"
 
 
 def billing_ua(realm: Realm = "cn") -> str:
@@ -350,7 +376,7 @@ def billing_ua(realm: Realm = "cn") -> str:
         from admin import client_profile as cprofile
         v = cprofile.desktop_version(realm=realm)
     except Exception:  # noqa: BLE001
-        v = client_version()
+        v = client_version(realm)
     return f"{brand}/{v}"
 
 

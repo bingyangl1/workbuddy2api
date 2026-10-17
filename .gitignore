@@ -117,8 +117,13 @@ web/tsconfig.tsbuildinfo
 web-wip/
 
 # 本地引擎运行日志（诊断用，不入库）
-_eng.log
-_eng.err
+# 用通配而非逐个列：排查时常用 _eng2/_eng3/_eng4 另起一份，
+# 逐个列会漏（本轮就漏了 4 个，差点误提交）。
+_eng*.log
+_eng*.err
+_atrest_secret.json
+_atrest_secret.err
+_wb_keyhook.js
 
 # ===== 发布签名私钥（绝不入库）=====
 _relkey/

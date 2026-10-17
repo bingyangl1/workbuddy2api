@@ -45,8 +45,30 @@ _FAIL_TTL = 300
 _RUN_TIMEOUT = 8
 
 _cache: dict = {"token": None, "ts": 0.0, "fail_ts": 0.0}
+#: 按 realm 分开缓存：两版客户端是**两套独立安装**（不同 exe、不同 SDK、
+#: 不同 channelId）→ 算出的设备指纹必然不同，绝不能共用一份。
+#: 键为 `cn` / `global`；空键（"")是「未指定 realm」时的历史槽位。
+_realm_cache: dict[str, dict] = {}
 _lock = threading.Lock()
 _warm_lock = threading.Lock()
+#: 按 realm 的预热锁：「只预热一次」是**每个版本**各自的保证。
+_realm_warm_locks: dict[str, threading.Lock] = {}
+
+
+def _slot(realm: str, create: bool = True) -> dict | None:
+    """取某 realm 的缓存槽。
+
+    `realm` 为空时返回**历史单槽** `_cache`（零回归：未指定版本的调用行为不变）。
+    """
+    r = (realm or "").strip().lower()
+    if not r:
+        return _cache
+    if r not in ("cn", "global"):
+        return _cache
+    if not create:
+        return _realm_cache.get(r)
+    with _lock:
+        return _realm_cache.setdefault(r, {"token": None, "ts": 0.0, "fail_ts": 0.0})
 
 
 def _node_bin() -> str | None:
@@ -59,36 +81,49 @@ def _node_bin() -> str | None:
     return shutil.which("node") or shutil.which("node.exe")
 
 
-def _mark_failure(now: float) -> None:
+def _mark_failure(now: float, realm: str = "") -> None:
+    slot = _slot(realm)
     with _lock:
-        _cache["fail_ts"] = now
-        _cache["token"] = None
-        _cache["ts"] = 0.0
+        slot["fail_ts"] = now
+        slot["token"] = None
+        slot["ts"] = 0.0
 
 
-def get_device_token(force: bool = False) -> str | None:
+def get_device_token(force: bool = False, realm: str = "") -> str | None:
     """返回本机设备风控 Token；取不到返回 None。
+
+    `realm`（`cn` / `global`）指定用**哪一版客户端**计算指纹：
+
+        cn     → `WorkBuddy.exe`   + channelId 109144
+        global → `WorkBuddyAI.exe` + channelId 400111
+
+    两版是独立安装、独立 SDK、独立渠道号 → **算出的 token 必然不同**。
+    若两版共用同一份 token，国际版请求会带着「国内版设备指纹」——
+    与 UA/风控头指向的版本矛盾，比缺头更容易被判成伪造客户端。
+
+    不传 `realm` 时走历史单槽（零回归）。
 
     force=True 时忽略缓存（含负缓存），重新向 SDK 索取（用于排查 / 测试）。
     """
     now = time.time()
+    slot = _slot(realm)
     if not force:
         with _lock:
-            if _cache["token"] and now - _cache["ts"] < _CACHE_TTL:
-                return _cache["token"]
+            if slot["token"] and now - slot["ts"] < _CACHE_TTL:
+                return slot["token"]
             # 负缓存命中：直接返回，避免在请求路径上同步 fork node 阻塞事件循环。
-            if _cache["fail_ts"] and now - _cache["fail_ts"] < _FAIL_TTL:
+            if slot["fail_ts"] and now - slot["fail_ts"] < _FAIL_TTL:
                 return None
 
         # A cache miss must never fork Node synchronously inside the ASGI event loop.
         # Serve the last token while a single background worker refreshes it.
-        warmup()
+        warmup(realm=realm)
         with _lock:
-            return _cache["token"]
+            return slot["token"]
 
     node = _node_bin()
     if not node or not _HELPER.is_file():
-        _mark_failure(now)
+        _mark_failure(now, realm)
         return None
 
     env = dict(os.environ)
@@ -99,17 +134,24 @@ def get_device_token(force: bool = False) -> str | None:
     # 这里额外做一件事：把我们**已经**发现的安装目录 / 版本号 / channelId
     # 下发给 helper，避免 Node 侧再扫一遍盘符；同时让 helper 报的版本号
     # 与本机真实客户端一致（而不是 helper 里的兜底默认值）。
+    #
+    # **必须按 realm 取值**：国际版要用 workbuddy-ai 的目录/版本/channelId，
+    # 否则算出来的是国内版指纹。
     try:
         from wb_install import WB
-        inst = WB.install_dir()
+        r = (realm or "").strip().lower()
+        inst = WB.install_dir(realm=r) if r else WB.install_dir()
         if inst and not env.get("WORKBUDDY_INSTALL_DIR"):
             env["WORKBUDDY_INSTALL_DIR"] = str(inst)
         if not env.get("WORKBUDDY_TURING_CHANNEL_ID"):
-            env["WORKBUDDY_TURING_CHANNEL_ID"] = str(WB.turing_channel_id())
+            env["WORKBUDDY_TURING_CHANNEL_ID"] = str(
+                WB.turing_channel_id(realm=r) if r else WB.turing_channel_id())
         if not env.get("WORKBUDDY_TURING_PRODUCT_NAME"):
-            env["WORKBUDDY_TURING_PRODUCT_NAME"] = WB.turing_product_name()
+            env["WORKBUDDY_TURING_PRODUCT_NAME"] = (
+                WB.turing_product_name(realm=r) if r else WB.turing_product_name())
         if not env.get("WORKBUDDY_TURING_VERSION"):
-            env["WORKBUDDY_TURING_VERSION"] = WB.desktop_version()
+            env["WORKBUDDY_TURING_VERSION"] = (
+                WB.desktop_version(realm=r) if r else WB.desktop_version())
     except Exception:
         # 发现失败不影响主流程：helper 自己还会再找一次。
         pass
@@ -129,11 +171,11 @@ def get_device_token(force: bool = False) -> str | None:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except Exception:
-        _mark_failure(now)
+        _mark_failure(now, realm)
         return None
 
     if out.returncode != 0:
-        _mark_failure(now)
+        _mark_failure(now, realm)
         return None
 
     token: str | None = None
@@ -154,43 +196,67 @@ def get_device_token(force: bool = False) -> str | None:
         token = None
 
     if not token:
-        _mark_failure(now)
+        _mark_failure(now, realm)
         return None
 
     with _lock:
-        _cache["token"] = token
-        _cache["ts"] = time.time()
-        _cache["fail_ts"] = 0.0
+        slot["token"] = token
+        slot["ts"] = time.time()
+        slot["fail_ts"] = 0.0
     return token
 
 
-def warmup() -> None:
+def warmup(realm: str = "") -> None:
     """在后台线程里预热一次 token。
 
     启动时调用。这样「第一次请求」不必在事件循环里承担 fork node 的阻塞；
     服务器上没有桌面端时，也会顺手把负缓存填上，让后续请求直接走快速失败分支。
     幂等：重复调用只会真正执行一次（由 `_warm_lock` 保证）。
+
+    `realm` 指定预热哪一版（两版设备指纹不同，缓存也分开）。
+    不传则预热历史单槽（零回归）。
     """
     def _run() -> None:
         try:
-            get_device_token(force=True)
+            get_device_token(force=True, realm=realm)
         except Exception:
             pass
         finally:
             _warm_lock.release()
 
-    if _warm_lock.acquire(blocking=False):
-        t = threading.Thread(target=_run, daemon=True, name="wb-turing-warmup")
+    # 「幂等一次」只对**同一 realm** 成立：两版要各自预热一次，
+    # 否则国际版第一次真实请求仍要在请求路径上 fork node。
+    key_suffix = (realm or "").strip().lower()
+    if key_suffix:
+        lock = _realm_warm_locks.setdefault(key_suffix, threading.Lock())
+    else:
+        lock = _warm_lock
+    if lock.acquire(blocking=False):
+        t = threading.Thread(target=_run, daemon=True,
+                             name=f"wb-turing-warmup{'-' + key_suffix if key_suffix else ''}")
         try:
             t.start()
         except Exception:
-            _warm_lock.release()
+            lock.release()
             raise
 
 
-def clear_cache() -> None:
-    """清除缓存（进程内）。调试用。"""
+def clear_cache(realm: str = "") -> None:
+    """清除缓存（进程内）。调试用。
+
+    `realm` 为空时清**所有**槽位（历史行为：清干净）；
+    指定 realm 时只清那一版。
+    """
     with _lock:
-        _cache["token"] = None
-        _cache["ts"] = 0.0
-        _cache["fail_ts"] = 0.0
+        r = (realm or "").strip().lower()
+        if r in ("cn", "global"):
+            slot = _realm_cache.get(r)
+            if slot is not None:
+                slot["token"] = None
+                slot["ts"] = 0.0
+                slot["fail_ts"] = 0.0
+            return
+        for slot in [_cache, *_realm_cache.values()]:
+            slot["token"] = None
+            slot["ts"] = 0.0
+            slot["fail_ts"] = 0.0
