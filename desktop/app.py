@@ -136,6 +136,23 @@ display:block;width:40%;height:100%;background:#42c08e;animation:load 1.3s infin
 </html>"""
 
 
+def _safe_eval(window, expr):
+    """在窗口里求值；**任何异常都返回 None**（不抛出）。
+
+    为什么单独包一层：PyWebView 的 js_api 回调依赖「发起调用那个文档」的
+    回调表。面板启动时的导航（`/panel` → `/panel/login/`、旧面板内部路由）
+    会销毁回调表，于是 `evaluate_js` 抛
+    `JavascriptException: _returnValuesCallbacks... is not a function`。
+
+    面板还在加载时这种抖动是**常态**。冒烟测试必须能容忍它继续轮询，
+    否则一次抖动就判失败 —— 而冒烟失败会直接卡住 release 工作流。
+    """
+    try:
+        return window.evaluate_js(expr)
+    except Exception:      # noqa: BLE001  GUI 线程销毁/导航都会抛，一律忽略
+        return None
+
+
 class Bridge:
     """Expose methods only: pywebview recursively serializes public object attributes."""
     def __init__(self, controller):
@@ -387,17 +404,88 @@ class DesktopAPI:
         return f"http://127.0.0.1:{self.port}/admin?desktop=1"
 
     def _smoke_test(self):
+        """冒烟测试：确认桌面端**能把后台界面渲染出来**。
+
+        ## 它在验证什么
+
+        打包出来的 EXE 是「能打开后台」的，而不是白屏 / 404 / JS 崩了。
+        这是 release 工作流的把关点。
+
+        ## 为什么不能只查旧面板的 DOM
+
+        原实现断言 `#app` 可见 + `#appVersion` 含版本号 —— 那是**旧面板**
+        （`admin/static/index.html`）的 id。P6 把桌面端默认落点改成新面板
+        （`/panel`）后，新面板是 React 应用、DOM 完全不同（没有 `#appVersion`），
+        断言永远不成立 —— **release 会被卡住，而本地手动打开却一切正常**。
+
+        ## 为什么不要求「已登录」
+
+        最初写的判据是「已离开 /login + 文本 > 200 字符」，实测**永远失败**：
+        全新数据目录里没有账号，免密登录后也会停在 `/panel/login/`
+        （94 字符）。而冒烟测试跑在**空数据目录**里，本来就不该有登录态。
+
+        正确判据：**React 已挂载 + 页面有内容**（登录页也算）。
+        登录是用户数据的事，不是「构建是否可用」的事。
+
+        | 面板 | 判定依据 |
+        |---|---|
+        | 旧面板 `/admin` | `#app` 不隐藏 + `#appVersion` 含版本号（原逻辑保留） |
+        | 新面板 `/panel` | React 已挂载 + `innerText` 有内容（**登录页也算通过**） |
+
+        两者任一满足即通过。
+        """
         result = {"ok": False, "version": VERSION, "port": self.port}
+        legacy_expr = (
+            "(function(){try{"
+            "var a=document.getElementById('app');"
+            "var v=document.getElementById('appVersion');"
+            "return !!(a && !a.classList.contains('hidden') && v && "
+            "v.textContent.indexOf('v" + VERSION + "')>=0);"
+            "}catch(e){return false;}})()"
+        )
+        # 新面板：React 已挂载 + 页面确有渲染内容。
+        # 门槛取 60 字符（登录页实测 94），足以区分「白屏/骨架」与「真渲染」。
+        modern_expr = (
+            "(function(){try{"
+            "var t=(document.body&&document.body.innerText)||'';"
+            "if(t.length<60) return false;"
+            "var n=0;"
+            "document.querySelectorAll('*').forEach(function(el){"
+            "  if(n>0) return;"
+            "  for(var k in el){"
+            "    if(k.indexOf('__reactFiber')===0||k.indexOf('__reactContainer')===0){n++;break;}"
+            "  }});"
+            "return n>0;"
+            "}catch(e){return false;}})()"
+        )
         try:
             for _ in range(60):
                 if self.closing.wait(.5):
                     break
-                ready = self.window.evaluate_js("document.getElementById('app') && "
-                    "!document.getElementById('app').classList.contains('hidden') && "
-                    "document.getElementById('appVersion').textContent.includes('v" + VERSION + "')")
-                if ready:
-                    result.update(ok=True, title=self.window.evaluate_js("document.title"),
-                                  footer=self.window.evaluate_js("document.getElementById('appVersion').textContent"))
+                # ⚠️ **每一次 evaluate_js 都要单独兜住异常**。
+                #
+                # PyWebView 的 js_api 回调依赖「发起调用那个文档」的回调表；
+                # 面板启动时会经历导航（/panel → /panel/login/ 或 /admin 内部路由），
+                # 回调表随文档销毁 → evaluate_js 抛
+                # `JavascriptException: _returnValuesCallbacks... is not a function`。
+                #
+                # 原实现把这三次求值都放在同一个 try 里 → 一次抖动就跳到 finally，
+                # 冒烟直接判失败（**实测：next 面板就是这样挂的**）。
+                # 面板还在加载时这种抖动是常态，不是错误。
+                if _safe_eval(self.window, legacy_expr):
+                    result.update(ok=True, mode="legacy",
+                                  title=_safe_eval(self.window, "document.title"),
+                                  footer=_safe_eval(
+                                      self.window,
+                                      "document.getElementById('appVersion').textContent"))
+                    break
+                if _safe_eval(self.window, modern_expr):
+                    result.update(ok=True, mode="modern",
+                                  title=_safe_eval(self.window, "document.title"),
+                                  path=_safe_eval(self.window, "location.pathname"),
+                                  chars=_safe_eval(
+                                      self.window,
+                                      "(document.body.innerText||'').length"))
                     break
         except Exception as exc:
             result["error"] = str(exc)

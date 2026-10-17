@@ -331,19 +331,86 @@ class FrontendBridgeCase(unittest.TestCase):
                       "登录页也要尝试免密（那里不会导航，回调表不会被销毁）")
 
 
-class SmokeTestStillLegacyAwareCase(unittest.TestCase):
-    """冒烟测试对旧面板的断言不该阻止新面板（它只在旧面板跑）。"""
+class SmokeTestBothPanelsCase(unittest.TestCase):
+    """冒烟测试必须同时支持两种面板。
 
-    def test_smoke_test_references_legacy_dom(self):
+    ## 为什么（这是一条真实回归）
+
+    P6 把桌面端默认落点从 `/admin` 改成 `/panel`，但冒烟测试仍只断言旧面板的
+    `#app` / `#appVersion` —— 新面板是 React 应用，没有这些 id。
+
+    后果：**release 工作流的冒烟测试会永远失败**，而本地手动打开一切正常。
+    这种「只在 CI 挂」的故障最难查。
+
+    原测试甚至写了一条反向断言「冒烟测试不该断言新面板」—— 那是**错的**，
+    它把「没跟上改动」当成了正确行为。已改为要求同时兼容两种。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import re
         src = (ROOT / "desktop" / "app.py").read_text(encoding="utf-8")
         i = src.find("def _smoke_test")
-        body = src[i:i + 1400]
-        self.assertIn("getElementById", body)
-        # 冒烟测试查的是旧面板的 DOM id；新面板下该断言会失败，
-        # 所以它必须只在 legacy 落点下启用（由 WB_DESKTOP_SMOKE 控制，
-        # 而 CI 用的是 legacy 构建），这里只需确认它没有对新面板做断言。
-        self.assertNotIn("/panel", body,
-                         "冒烟测试不该断言新面板的 DOM（旧面板 id 不同）")
+        # 取到下一个顶层 def 为止（固定长度会把 mode="modern" 截掉，踩过）
+        if i > 0:
+            m = re.search(r"\n    def ", src[i + 20:])
+            end = i + 20 + m.start() if m else len(src)
+            cls.body = src[i:end]
+        else:
+            cls.body = ""
+
+    def test_checks_legacy_panel(self):
+        """旧面板：保持原判据（#app 可见 + #appVersion 含版本号）。"""
+        self.assertIn("appVersion", self.body,
+                      "旧面板的判据应保留（legacy 构建仍要能冒烟）")
+        self.assertIn("classList.contains('hidden')", self.body)
+
+    def test_checks_modern_panel(self):
+        """新面板：必须有自己的判据，否则 next 构建冒烟必挂。"""
+        self.assertIn("__reactFiber", self.body,
+                      "新面板判据应检查 React 是否已挂载")
+        self.assertIn("innerText", self.body,
+                      "新面板判据应检查页面有实际内容")
+
+    def test_modern_does_not_require_login(self):
+        """**冒烟测试不该要求已登录**（这是实测踩出来的）。
+
+        最初写的判据是「已离开 /login + 文本 > 200」，实测**永远失败**：
+        冒烟跑在全新数据目录里，没有账号，免密登录后也停在
+        `/panel/login/`（94 字符）。
+
+        登录是用户数据的事，不是「构建是否可用」的事。
+        """
+        # 判据里不该出现「路径含 /login 就判失败」
+        self.assertNotIn("pathname.indexOf('/login')>=0) return false",
+                         self.body,
+                         "冒烟不该因为停在登录页就判失败"
+                         "（空数据目录里本来就没有登录态）")
+
+    def test_modern_threshold_is_reachable(self):
+        """内容阈值必须低于登录页的实际字符数（实测 94）。"""
+        import re
+        m = re.search(r"t\.length\s*<\s*(\d+)", self.body)
+        self.assertIsNotNone(m, "应能从判据里取到文本长度阈值")
+        threshold = int(m.group(1))
+        self.assertLess(threshold, 90,
+                        f"阈值 {threshold} 应低于登录页实测的 94 字符，"
+                        "否则空数据目录下冒烟永远失败")
+
+    def test_each_eval_is_guarded(self):
+        """每次 evaluate_js 都必须单独兜异常（导航会销毁 js_api 回调表）。"""
+        self.assertIn("_safe_eval", self.body,
+                      "**必须用 _safe_eval** —— 面板导航时 evaluate_js 会抛异常，"
+                      "不兜住就一次抖动判失败，直接卡住 release")
+
+    def test_reports_which_panel(self):
+        """结果里要写明走的是哪个分支（排障时需要知道）。"""
+        self.assertIn('"legacy"', self.body)
+        self.assertIn('"modern"', self.body)
+
+    def test_both_paths_keep_version_field(self):
+        """两种分支都要带上版本信息，便于核对。"""
+        self.assertIn('"version": VERSION', self.body)
 
 
 if __name__ == "__main__":
