@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   workbuddy2api 本地开发启动（源码方式）。
 
@@ -7,7 +7,7 @@
   对比：`start_daemon.bat` 是后台常驻 + 自动拉起（部署用），开发时不便看日志。
 
   脚本做四件事：
-    1. 环境自检（Python / 依赖 / 前端产物 / MySQL 隧道 / 端口占用）
+    1. 环境自检（Python / 依赖 / 前端产物 / 数据库连通性 / 端口占用）
     2. 注入开发用环境变量
     3. 提示可访问的入口
     4. 启动服务
@@ -28,12 +28,17 @@
   （`config.py` 里 `ADMIN_ENABLE_DOCS` 默认 0）。接口文档会暴露全部路由与
   请求结构，非测试环境不该默认开着。
 
+.PARAMETER Tunnel
+  数据库改走 SSH 隧道（127.0.0.1:13306）而不是默认的局域网直连。
+  什么时候用：不在同一网段（出差 / 公司 VPN 隔离 / 只允许 SSH 出网）。
+
 .EXAMPLE
-  .\dev.ps1                 # 启动（带上游只读护栏；/docs 关闭）
+  .\dev.ps1                 # 启动（带上游只读护栏；/docs 关闭；数据库直连）
   .\dev.ps1 -Check          # 只自检
   .\dev.ps1 -Docs           # 启动并打开接口文档
   .\dev.ps1 -Live           # 启动并允许真实触达上游
   .\dev.ps1 -NextPanel      # 启动且默认进新面板
+  .\dev.ps1 -NextPanel -Tunnel   # 不在同一网段时，改走 SSH 隧道
 
 .NOTES
   如果提示「无法加载文件，因为在此系统上禁止运行脚本」，用：
@@ -45,7 +50,8 @@ param(
     [switch]$Live,
     [switch]$Check,
     [switch]$NextPanel,
-    [switch]$Docs
+    [switch]$Docs,
+    [switch]$Tunnel
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,8 +61,22 @@ Set-Location $PSScriptRoot
 # 开发环境配置（按需修改；也可以改用项目根的 .env 文件，两者等价）
 # ──────────────────────────────────────────────────────────────────────────
 $DevConfig = [ordered]@{
-    # 数据库：本机没有 MySQL，dev 库在远程，需要 SSH 隧道映射到本地 13306
-    ADMIN_DATABASE_URL   = 'mysql+pymysql://root:wb2api_dev_root@127.0.0.1:13306/workbuddy_admin'
+    # 数据库：dev 库在局域网机器 192.168.5.47 上，**直连 3306**。
+    #
+    # 为什么不再走 SSH 隧道（127.0.0.1:13306）：
+    #
+    # 那里跑的是 Docker 里的 MySQL，docker-proxy 默认把 3306 映射到
+    # **所有网卡**（实测 `LISTEN 0 4096 0.0.0.0:3306`），所以局域网内
+    # 直接能连。实测对比：
+    #
+    #     直连 192.168.5.47:3306   →   31 ms
+    #     隧道 127.0.0.1:13306     →  278 ms（多绕一跳 SSH，慢 8 倍）
+    #
+    # 原注释「本机没有 MySQL，需要 SSH 隧道」是建脚本时的**假设，没验证过**，
+    # 一直被当事实沿用。直连少一个失败点，也快得多。
+    #
+    # 如果你在**不同网段**（出差 / 公司 VPN 隔离），加 `-Tunnel` 改走隧道。
+    ADMIN_DATABASE_URL   = 'mysql+pymysql://root:wb2api_dev_root@192.168.5.47:3306/workbuddy_admin'
     ADMIN_USERNAME       = 'admin'
     ADMIN_PASSWORD       = 'Wb2!LocalTest8790'
     ADMIN_JWT_SECRET     = 'wb2api_local_jwt_secret_dev_only'
@@ -78,6 +98,13 @@ if ($NextPanel) { $DevConfig['ADMIN_DEFAULT_PANEL'] = 'next' }
 if ($Live)      { $DevConfig['ADMIN_UPSTREAM_READONLY'] = '0' }
 # `/docs` 必须**显式**打开（用户要求：非测试环境默认关闭）
 if ($Docs)      { $DevConfig['ADMIN_ENABLE_DOCS'] = '1' }
+# -Tunnel：改走 SSH 隧道（默认直连局域网 3306）
+#
+# 什么时候需要：不在同一网段时（出差 / 公司 VPN 隔离 / 只允许 SSH 出网）。
+if ($Tunnel) {
+    $DevConfig['ADMIN_DATABASE_URL'] =
+        'mysql+pymysql://root:wb2api_dev_root@127.0.0.1:13306/workbuddy_admin'
+}
 
 $port = $DevConfig['ADMIN_PORT']
 
@@ -133,15 +160,36 @@ if (Test-Path $outIndex) {
     Write-Host '        npm run build' -ForegroundColor DarkGray
 }
 
-Write-Head '3/5  MySQL 隧道（127.0.0.1:13306）'
-$tun = (Test-NetConnection -ComputerName 127.0.0.1 -Port 13306 -WarningAction SilentlyContinue).TcpTestSucceeded
-if (-not $tun) {
-    Write-Bad '隧道不通！服务能启动，但**登录会返回 500**（不是密码错）。'
-    Write-Host '        另开一个窗口执行下面这条，并保持它开着：' -ForegroundColor DarkGray
-    Write-Host '          ssh -N -L 13306:127.0.0.1:3306 root@192.168.5.47' -ForegroundColor White
+# ── 3/5 数据库连通性 ──────────────────────────────────────────────
+#
+# 从 ADMIN_DATABASE_URL 里解析出实际要连的 host:port 再测 ——
+# 原来是硬编码测 127.0.0.1:13306，改成直连后那条检查就永远失败（自检骗人）。
+$dbUrl = [string]$DevConfig['ADMIN_DATABASE_URL']
+$dbHost = ''
+$dbPort = 3306
+if ($dbUrl -match '@([^/:]+):(\d+)/') {
+    $dbHost = $Matches[1]
+    $dbPort = [int]$Matches[2]
+}
+Write-Head "3/5  数据库（${dbHost}:${dbPort}）"
+$dbOk = $false
+if ($dbHost) {
+    $dbOk = (Test-NetConnection -ComputerName $dbHost -Port $dbPort -WarningAction SilentlyContinue).TcpTestSucceeded
+}
+if (-not $dbOk) {
+    Write-Bad "数据库连不上（${dbHost}:${dbPort}）！服务能启动，但**登录会返回 500**（不是密码错）。"
+    if ($Tunnel) {
+        Write-Host '        你用了 -Tunnel，需要先另开窗口建隧道并保持开着：' -ForegroundColor DarkGray
+        Write-Host '          ssh -N -L 13306:127.0.0.1:3306 root@192.168.5.47' -ForegroundColor White
+    } else {
+        Write-Host '        默认走局域网直连。排查方向：' -ForegroundColor DarkGray
+        Write-Host '          1) 是否和 192.168.5.47 在同一网段（ping / ipconfig）' -ForegroundColor DarkGray
+        Write-Host '          2) 对方 MySQL 是否在跑（docker ps | grep mysql）' -ForegroundColor DarkGray
+        Write-Host '          3) 不在同一网段时改用隧道：.\dev.ps1 -Tunnel' -ForegroundColor White
+    }
     $fatal = $true
 } else {
-    Write-Ok '隧道已通'
+    Write-Ok "数据库已通（${dbHost}:${dbPort}）"
 }
 
 Write-Head "4/5  端口 $port"

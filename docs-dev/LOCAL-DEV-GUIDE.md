@@ -8,44 +8,48 @@
 ## 0. 太长不看（TL;DR）
 
 ```powershell
-# 1) 建 MySQL 隧道（本机 dev 库在远程 192.168.5.47，映射到本地 13306）
-ssh -N -L 13306:127.0.0.1:3306 root@192.168.5.47
-
-# 2) 另开一个终端：起服务（前台，日志直接可见）
+# 1) 一条命令起服务（数据库默认**局域网直连**）
 cd F:\wb2api\workbuddy2api
-$env:ADMIN_DATABASE_URL='mysql+pymysql://root:wb2api_dev_root@127.0.0.1:13306/workbuddy_admin'
-$env:ADMIN_USERNAME='admin'; $env:ADMIN_PASSWORD='Wb2!LocalTest8790'
-$env:ADMIN_JWT_SECRET='wb2api_local_jwt_secret_dev_only'
-$env:ADMIN_PANEL_STATIC='1'; $env:ADMIN_PANEL_PATH='/panel'
-python main.py
+.\dev.ps1 -NextPanel        # 新面板；不加 -NextPanel 则打开旧面板
 
-# 3) 浏览器打开
+# 2) 浏览器打开
 #    新面板  http://127.0.0.1:8790/panel/      账号 admin / 密码 Wb2!LocalTest8790
 #    旧面板  http://127.0.0.1:8790/admin-legacy/
 ```
 
+> **不需要先建 SSH 隧道**。dev 库跑在 `192.168.5.47` 的 Docker 里，
+> `docker-proxy` 默认把 3306 映射到所有网卡，同一网段直接能连。
+> 实测直连 31ms、走隧道 278ms（多绕一跳 SSH，慢 8 倍）。
+>
+> 只有**不在同一网段**时（出差 / 公司 VPN 隔离）才需要 `-Tunnel`。
+
 ---
 
-## 1. 前置：数据库（必须的，服务起来没库不能登录）
+## 1. 前置：数据库
 
-本机**没有**本地 MySQL，dev 库在 `192.168.5.47`（almalinux），需要 SSH 隧道把
-远程 3306 映射到本地 13306。
-
-```powershell
-# 建立隧道（保持这个窗口开着；-N 表示只做转发不执行命令）
-ssh -N -L 13306:127.0.0.1:3306 root@192.168.5.47
-```
-
-验证隧道通了：
+dev 库在 `192.168.5.47`（almalinux）的 **Docker** 里。默认**直连**：
 
 ```powershell
-Test-NetConnection -ComputerName 127.0.0.1 -Port 13306 -InformationLevel Quiet
+# 验证直连（这是默认配置）
+Test-NetConnection -ComputerName 192.168.5.47 -Port 3306 -InformationLevel Quiet
 # True 表示通
 ```
 
-> **断了会怎样**：服务能启动，但**登录会返回 500**（连不上库）。
-> 症状辨识：`/api/login` 500 且日志里有 `Can't connect to MySQL server ... WinError 10061`。
-> 重跑上面那条 ssh 命令即可。
+### 什么时候需要隧道
+
+只有不在同一网段时（出差 / 公司 VPN 隔离 / 只允许 SSH 出网）：
+
+```powershell
+# 另开一个窗口，建立隧道并保持开着（-N 表示只做转发不执行命令）
+ssh -N -L 13306:127.0.0.1:3306 root@192.168.5.47
+
+# 启动时加 -Tunnel
+.\dev.ps1 -NextPanel -Tunnel
+```
+
+> **数据库不通会怎样**：服务能启动，但**登录会返回 500**（不是密码错）。
+> 症状辨识：`/api/login` 500 且日志里有 `Can't connect to MySQL server ...`。
+> 直连不通先确认网段；隧道模式则重跑上面那条 ssh 命令。
 
 ---
 
@@ -61,7 +65,7 @@ Copy-Item .env.example .env
 然后编辑 `.env`，至少改这几项：
 
 ```ini
-ADMIN_DATABASE_URL=mysql+pymysql://root:wb2api_dev_root@127.0.0.1:13306/workbuddy_admin
+ADMIN_DATABASE_URL=mysql+pymysql://root:wb2api_dev_root@192.168.5.47:3306/workbuddy_admin
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=Wb2!LocalTest8790
 ADMIN_JWT_SECRET=wb2api_local_jwt_secret_dev_only
@@ -87,7 +91,7 @@ python main.py
 
 ```powershell
 cd F:\wb2api\workbuddy2api
-$env:ADMIN_DATABASE_URL='mysql+pymysql://root:wb2api_dev_root@127.0.0.1:13306/workbuddy_admin'
+$env:ADMIN_DATABASE_URL='mysql+pymysql://root:wb2api_dev_root@192.168.5.47:3306/workbuddy_admin'
 $env:ADMIN_USERNAME='admin'
 $env:ADMIN_PASSWORD='Wb2!LocalTest8790'
 $env:ADMIN_JWT_SECRET='wb2api_local_jwt_secret_dev_only'
@@ -280,7 +284,7 @@ python scripts/panel_smoke_test.py
 
 | 症状 | 原因 / 解决 |
 |---|---|
-| 登录返回 **500**，日志 `Can't connect to MySQL` | SSH 隧道断了 → 重跑 `ssh -N -L 13306:...` |
+| 登录返回 **500**，日志 `Can't connect to MySQL` | 数据库不通。**默认直连**：确认同一网段、对方 MySQL 在跑；隧道模式：`ssh -N -L 13306:...` |
 | 端口 8790 被占 / 服务起不来 | `Get-Process python \| Stop-Process -Force` 后重试（旧进程没死透） |
 | 改了代码但 HTTP 行为没变 | 旧 uvicorn 子进程还在 → 杀干净所有 python 再起 |
 | 改了前端但页面没变 | 没重建 `web/out`，或 `.next` 缓存陈旧 → 删 `.next` 重建 |
