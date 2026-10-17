@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 桌面端（PyWebView）免密引导。
+ * 桌面端（PyWebView）桥接：免密登录 + 版本更新。
  *
  * ## 为什么需要
  *
@@ -15,21 +15,39 @@
  * 表现是「桌面版打不开后台」，而同样代码在浏览器里输密码却正常，
  * 很容易误判成新面板本身的 bug。
  *
+ * 同理，「版本与更新」的**下载/安装**动作也只能由桌面端执行（浏览器里没有
+ * 权限替换 EXE），所以这部分也必须走桥。
+ *
  * ## 安全边界（后端 `desktop_login` 也已校验，双保险）
  *
  * 免密只在**同时满足**下面三条时才发生：
  *
  *   1. 页面跑在 PyWebView 里（存在 `window.pywebview.api.desktop_login`）
- *   2. URL 带 `?desktop=1`（桌面端自己打开的标记）
+ *   2. URL 带 `?desktop=1`（桌面端自己打开的标记，可能被重定向剥掉）
  *   3. 后端再次校验「当前窗口 URL 是本机回环 + 本进程端口 + 白名单路径」
  *
  * 只做第 1 条是不够的：网页里也能伪造 `window.pywebview`。所以后端那次
  * 校验才是真正的闸门；前两条只是「不要白跑一趟」的快速判断。
  */
 
+/**
+ * 类型来自 `lib/types.ts`（与 `/api/app/releases` 共用同一份契约）。
+ * 这里**重新导出**，让调用方只 import 一个模块即可。
+ */
+import type {ReleaseRow, ReleasesPayload, UpdateState} from '@/lib/types';
+
+export type {ReleaseRow, ReleasesPayload, UpdateState};
+
 /** PyWebView 暴露的桥（只声明我们用到的部分）。 */
 interface PyWebViewApi {
   desktop_login?: () => Promise<{token?: string}>;
+  check_updates?: () => Promise<ReleasesPayload>;
+  update_status?: () => Promise<UpdateState & {runtime?: string}>;
+  download_update?: (releaseId: number) => Promise<{error?: string}>;
+  apply_update?: () => Promise<{error?: string}>;
+  retry_runtime?: () => Promise<{ok?: boolean}>;
+  /** 桌面端当前窗口 URL（PyWebView 自带，用于诊断） */
+  [key: string]: unknown;
 }
 
 interface PyWebViewBridge {
@@ -223,3 +241,92 @@ function readTokenSafe(): boolean {
     return false;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// 版本与更新
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * 调用桥上的某个方法，带超时保护。
+ *
+ * 与 `requestDesktopToken` 同一个原因：PyWebView 的 js_api 回调依赖
+ * 「发起调用那个文档」的回调表，文档一旦导航，Promise 就永不 settle ——
+ * 不加超时会让 UI 永久卡在「检查中…」。
+ *
+ * 返回 `undefined` 表示「桥不可用 / 超时 / 抛错」，调用方据此决定是否降级。
+ */
+async function callBridge<T>(
+  method: keyof PyWebViewApi,
+  timeoutMs = 20000,
+  ...args: unknown[]
+): Promise<T | undefined> {
+  if (typeof window === 'undefined') return undefined;
+  const api = window.pywebview?.api;
+  const fn = api?.[method];
+  if (typeof fn !== 'function') return undefined;
+  try {
+    const timeout = new Promise<undefined>((resolve) => {
+      window.setTimeout(() => resolve(undefined), timeoutMs);
+    });
+    const call = (fn as (...a: unknown[]) => Promise<T>).apply(api, args);
+    return await Promise.race([call, timeout]);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 当前是否跑在桌面端（能执行下载/安装）。 */
+export function isNativeShell(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.pywebview?.api?.apply_update === 'function';
+}
+
+/**
+ * 检查更新。
+ *
+ * 桌面端走桥（能拿到 `runtime` / `update` 这些本机状态）；
+ * 浏览器/服务端部署退化为 `GET /api/app/releases`（同一份数据，只是没有本机动作）。
+ *
+ * 两者字段一致，所以上层 UI 不需要分叉。
+ *
+ * ⚠️ 降级分支**必须走 api 客户端**（`systemApi.releases()`），不能用裸
+ * `fetch('/api/app/releases')` —— 那个端点要 `X-Admin-Token`，裸 fetch 不会带，
+ * 结果是 401 且 UI 上表现为「检查更新失败」，很难看出是漏了鉴权。
+ */
+export async function checkUpdates(): Promise<ReleasesPayload> {
+  if (isNativeShell()) {
+    const native = await callBridge<ReleasesPayload>('check_updates', 30000);
+    if (native && typeof native.version === 'string') return native;
+    // 桥在但调用失败：不要静默退回服务端（那会少了本机状态）——
+    // 继续走下面的只读接口，至少让用户看到版本与历史。
+  }
+  const {systemApi} = await import('@/lib/api');
+  return systemApi.releases();
+}
+
+/** 轮询下载/安装状态（仅桌面端有意义；非桌面端返回 undefined）。 */
+export async function pollUpdateStatus(): Promise<
+  (UpdateState & {runtime?: string}) | undefined
+> {
+  return callBridge<UpdateState & {runtime?: string}>('update_status', 8000);
+}
+
+/** 下载更新（仅桌面端）。返回 `{error}` 或空对象。 */
+export async function downloadUpdate(
+  releaseId: number,
+): Promise<{error?: string}> {
+  const r = await callBridge<{error?: string}>('download_update', 60000, releaseId);
+  return r ?? {error: '桌面端未响应下载请求'};
+}
+
+/** 重启并安装更新（仅桌面端）。 */
+export async function applyUpdate(): Promise<{error?: string}> {
+  const r = await callBridge<{error?: string}>('apply_update', 20000);
+  return r ?? {error: '桌面端未响应安装请求'};
+}
+
+/** 重试准备运行环境（Node.js，仅桌面端）。 */
+export async function retryRuntime(): Promise<void> {
+  await callBridge<{ok?: boolean}>('retry_runtime', 10000);
+}
+

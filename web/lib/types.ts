@@ -610,6 +610,44 @@ export interface VersionInfo {
   [k: string]: unknown;
 }
 
+/* ── 版本与更新（desktop/updates.py::check，桌面端与浏览器共用同一结构）─ */
+
+/** 单个历史版本的元数据。 */
+export interface ReleaseRow {
+  id: number;
+  tag: string;                // v1.2.3
+  name: string;
+  body: string;               // Release 正文（**纯文本**渲染，绝不解析 HTML）
+  date: string;               // published_at（ISO，可能为空）
+  url: string;                // 已由服务端校验过前缀
+  installable: boolean;       // 有 EXE + 校验文件才可下载
+}
+
+/** 下载/安装进度（仅桌面端有）。 */
+export interface UpdateState {
+  busy: boolean;
+  message: string;
+  ready: boolean;             // true = 已下载校验完，可「重启并安装」
+}
+
+/**
+ * `GET /api/app/releases` 与桌面端 `check_updates()` 的共同返回。
+ *
+ * `runtime` / `update` 两个字段**仅桌面端**提供（本机运行环境与下载状态）；
+ * 浏览器端忽略它们即可。
+ */
+export interface ReleasesPayload {
+  version: string;            // 当前版本
+  releases: ReleaseRow[];     // 历史版本（新→旧，最多 100）
+  latest: ReleaseRow | null;  // 可升级到的最新版本；无更新时 null
+  available: boolean;
+  error: string;              // 非空 = 检查失败的原因（已有缓存时仍返回列表）
+  checked?: boolean;
+  releases_url: string;       // 「打开 Releases」的目标（前缀白名单来源）
+  runtime?: string;           // 仅桌面端
+  update?: UpdateState;       // 仅桌面端
+}
+
 /* ── Changelog 查看器（routers/releases.py::changelog）───────────── */
 export interface ChangelogSection {
   title: string;              // 新增 / 修复 / 改进 / 安全

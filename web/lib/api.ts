@@ -38,6 +38,7 @@ import type {
   ModelCatalogResponse,
   ModelConfig,
   ModelGroup,
+  ReleasesPayload,
   ModelHealth,
   ModelLimitRow,
   ScanLocalResult,
@@ -477,6 +478,13 @@ export const layoutApi = {  get: () => get<{layout: LayoutPayload; items: string
 export const systemApi = {
   version: () => get<VersionInfo>('/api/app/version'),
   changelog: () => get<ChangelogResponse>('/api/app/changelog'),
+  /**
+   * 版本更新信息（**只读**：浏览器里不能下载/安装）。
+   *
+   * 与桌面端的 `pywebview.api.check_updates()` 返回同一份结构，
+   * 所以 UI 不需要分叉。下载/安装那两个动作只能由桌面端桥执行。
+   */
+  releases: () => get<ReleasesPayload>('/api/app/releases'),
 };
 
 /* ── 本地快照备份（routers/backup.py，P5）───────────────────────── */

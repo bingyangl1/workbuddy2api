@@ -28,6 +28,7 @@ import {Menu, X} from 'lucide-react';
 
 import {isNavActive} from '@/lib/app-nav';
 import {BASE_PATH} from '@/lib/base-path';
+import {VersionButton} from '@/components/desktop/VersionButton';
 import {useLayout} from '@/lib/layout-context';
 import {useT} from '@/lib/i18n/provider';
 import {cn} from '@/lib/utils';
@@ -82,8 +83,15 @@ function NavList({onNavigate}: {onNavigate?: () => void}) {
 export function Sidebar() {
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-card/40 lg:block">
-      <div className="sticky top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto p-3">
-        <NavList />
+      {/* flex 列布局：导航区可滚，版本按钮固定在底部（与旧面板左下角的
+          版本入口位置一致，用户肌肉记忆不需要重学）。 */}
+      <div className="sticky top-14 flex max-h-[calc(100vh-3.5rem)] flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <NavList />
+        </div>
+        <div className="border-t p-2">
+          <VersionButton />
+        </div>
       </div>
     </aside>
   );
@@ -113,6 +121,10 @@ export function MobileNav() {
           </Button>
         </div>
         <NavList onNavigate={() => setOpen(false)} />
+        {/* 窄屏也保留版本入口 —— 否则手机上完全看不到版本/更新 */}
+        <div className="mt-4 border-t pt-2">
+          <VersionButton />
+        </div>
       </div>
     </div>
   ) : null;
